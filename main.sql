@@ -111,9 +111,11 @@ with
 election_maxes as (
 	select
 		election_id,
-		-- max votes must be positive to actually cause a win
-		-- TODO think about how this could impact stabilization bucket updates
-		max(case when total_vote > 0 then total_vote else 0 end) as max_votes,
+		-- if all candidates are negative or zero, then:
+		-- - if there isn't a current winner the new current winner must have non-negative votes
+		-- - if there is a current winner who is negative and someone is less negative then the less negative should fill
+		-- - if there is a current winner who is zero and everyone is negative or zero then no one should fill
+		max(total_vote) as max_votes,
 		-- TODO arbitrary fill requirement for now
 		max(case when stabilization_bucket is not null and stabilization_bucket >= 10 then stabilization_bucket else null end) as max_bucket
 
@@ -143,8 +145,8 @@ select
 		-- there's no current winner
 		when current_winner.total_vote is null then
 			case
-				-- this row uniquely has max votes
-				when max_votes.num_candidates = 1 and c.total_vote = max_votes.total_vote then null
+				-- this row uniquely has max non-negative votes
+				when max_votes.num_candidates = 1 and max_votes.total_vote >= 0 and c.total_vote = max_votes.total_vote then null
 				-- there's a tie, so we simply "do nothing", making no one the winner yet and keeping all the buckets at 0
 				else 0
 			end
