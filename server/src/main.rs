@@ -1,47 +1,52 @@
-use actix_web::{get, post, web::{self, Json, Path}, Responder, HttpResponse};
-
-use tokio::sync::RwLock;
-use std::collections::{hash_map, HashMap};
-use std::sync::atomic::AtomicU64;
-type AppState = RwLock<HashMap<u64, String>>;
-
-#[get("/get_voter/{voter_id}")]
-async fn get_voter(voter_id: Path<u64>, state: web::Data<AppState>) -> impl Responder {
-	let voters = state.read().await;
-	match voters.get(&voter_id.into_inner()) {
-		Some(voter) => HttpResponse::Ok().json(voter),
-		None => HttpResponse::NotFound().finish(),
-	}
-}
-
-#[post("/add_voter")]
-async fn add_voter(voter: Json<String>, state: web::Data<AppState>) -> impl Responder {
-	let mut voters = state.write().await;
-	match voters.entry(voter_id.into_inner()) {
-		// do nothing in the occupied case?
-		hash_map::Entry::Occupied(_) => {},
-		hash_map::Entry::Vacant(e) => { e.insert(voter.into_inner()); },
-	}
-	// this is one of those security things, do we say whether we did anything?
-	HttpResponse::NoContent().finish()
+fn main() {
+	unimplemented!();
 }
 
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-	let voters: HashMap<u64, String> = HashMap::new();
-	let state = web::Data::new(RwLock::new(voters));
+// use actix_web::{get, post, web::{self, Json, Path}, Responder, HttpResponse};
 
-	actix_web::HttpServer::new(move ||
-		actix_web::App::new()
-			.app_data(state.clone())
-			.service(get_voter)
-			.service(add_voter)
-	)
-		.bind("127.0.0.1:5050")?
-		.run()
-		.await
-}
+// use tokio::sync::RwLock;
+// use std::collections::{hash_map, HashMap};
+// use std::sync::atomic::AtomicU64;
+// type AppState = RwLock<HashMap<u64, String>>;
+
+// #[get("/get_voter/{voter_id}")]
+// async fn get_voter(voter_id: Path<u64>, state: web::Data<AppState>) -> impl Responder {
+// 	let voters = state.read().await;
+// 	match voters.get(&voter_id.into_inner()) {
+// 		Some(voter) => HttpResponse::Ok().json(voter),
+// 		None => HttpResponse::NotFound().finish(),
+// 	}
+// }
+
+// #[post("/add_voter")]
+// async fn add_voter(voter: Json<String>, state: web::Data<AppState>) -> impl Responder {
+// 	let mut voters = state.write().await;
+// 	match voters.entry(voter_id.into_inner()) {
+// 		// do nothing in the occupied case?
+// 		hash_map::Entry::Occupied(_) => {},
+// 		hash_map::Entry::Vacant(e) => { e.insert(voter.into_inner()); },
+// 	}
+// 	// this is one of those security things, do we say whether we did anything?
+// 	HttpResponse::NoContent().finish()
+// }
+
+
+// #[actix_web::main]
+// async fn main() -> std::io::Result<()> {
+// 	let voters: HashMap<u64, String> = HashMap::new();
+// 	let state = web::Data::new(RwLock::new(voters));
+
+// 	actix_web::HttpServer::new(move ||
+// 		actix_web::App::new()
+// 			.app_data(state.clone())
+// 			.service(get_voter)
+// 			.service(add_voter)
+// 	)
+// 		.bind("127.0.0.1:5050")?
+// 		.run()
+// 		.await
+// }
 
 
 // // we have electorates
