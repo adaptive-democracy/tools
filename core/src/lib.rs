@@ -1,5 +1,68 @@
 use std::collections::HashMap;
 
+trait Keyable<K> {
+	fn key(&self) -> K;
+}
+
+fn index<T: Keyable<K>, K: Eq + std::hash::Hash>(items: Vec<T>) -> HashMap<K, T> {
+	items.into_iter()
+		.map(|item| (item.key(), item))
+		.collect()
+}
+
+
+fn insert_or_conflict<T: Clone, K: Eq + std::hash::Hash>(indexed: &mut HashMap<K, T>, key: K, item: T) -> Result<(), (K, T, T)> {
+	match indexed.get(&key) {
+		Some(existing_item) => Err((key, item, existing_item.clone())),
+		None => {
+			indexed.insert(key, item);
+			Ok(())
+		},
+	}
+}
+
+fn index_with_conflicts<T: Keyable<K> + Clone, K: Copy + Eq + std::hash::Hash>(items: Vec<T>) -> (HashMap<K, T>, Vec<(K, T, T)>) {
+	let mut indexed: HashMap<K, T> = HashMap::new();
+	let mut conflicts = vec![];
+	for item in items.into_iter() {
+		if let Err(conflict) = insert_or_conflict(&mut indexed, item.key(), item) {
+			conflicts.push(conflict);
+		}
+	}
+
+	(indexed, conflicts)
+}
+
+
+#[derive(Debug)]
+struct HistoryVec<T> {
+	history: Vec<T>,
+	current: T,
+}
+
+impl <T> HistoryVec<T> {
+	fn shift(&mut self, new_current: T) {
+		let current = std::mem::replace(&mut self.current, new_current);
+		self.history.push(current);
+	}
+
+	fn step_shift<F: Fn(&T) -> T>(&mut self, step_fn: F) {
+		let new_current = step_fn(&self.current);
+		self.shift(new_current);
+	}
+}
+
+
+fn step_histories<T, K: std::hash::Hash, F: Fn(&T) -> T>(
+	histories: &mut HashMap<K, HistoryVec<T>>,
+	step_fn: F,
+) {
+	for history in histories.values_mut() {
+		history.step_shift(&step_fn);
+	}
+}
+
+
 // TODO find fixed precision numeric library
 type Weight = f32;
 // TODO make id wrapper for different id?
@@ -23,8 +86,8 @@ struct Candidacy {
 	stabilization_bucket: Option<Weight>,
 }
 
-impl Candidacy {
-	pub fn key(&self) -> (usize, usize) {
+impl Keyable<(usize, usize)> for Candidacy {
+	fn key(&self) -> (usize, usize) {
 		(self.election_id, self.candidate_id)
 	}
 }
@@ -46,11 +109,13 @@ struct Allocation {
 	allocation_type: AllocationType,
 }
 
-impl Allocation {
-	pub fn key(&self) -> (usize, usize) {
+impl Keyable<(usize, usize)> for Allocation {
+	fn key(&self) -> (usize, usize) {
 		(self.election_id, self.candidate_id)
 	}
+}
 
+impl Allocation {
 	fn actual_vote(&self) -> Weight {
 		let direction = match self.allocation_type {
 			AllocationType::For => 1.0,
@@ -60,28 +125,6 @@ impl Allocation {
 		direction * self.weight.sqrt()
 	}
 }
-
-
-// #[derive(Debug)]
-// struct Analysis {
-// 	duplicate_person_vec: ,
-// 	duplicate_election_vec: ,
-// 	duplicate_candidacy_vec: ,
-// 	duplicate_allocation_vec: ,
-
-// 	invalid_voter_allocation_vec: ,
-// 	candidacy_total_vote: ,
-// }
-
-// fn analyze_all(
-// 	person_vec: Vec<Person>,
-// 	election_vec: Vec<Election>,
-// 	candidacy_vec: Vec<Candidacy>,
-// 	allocation_vec: Vec<Allocation>,
-// ) -> RetType {
-// 	// lookup map for person
-// 	// lookup map for election
-// }
 
 
 
@@ -117,9 +160,72 @@ fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Alloca
 // }
 
 
+#[derive(Debug, Clone)]
+struct Constitution {
+	id: usize,
+	name: String,
+	parent_id: Option<usize>,
+}
+
+impl Keyable<usize> for Constitution {
+	fn key(&self) -> usize {
+		self.id
+	}
+}
+
 
 #[cfg(test)]
 mod tests {
+	fn cons(id: usize, name: String, parent_id: Option<usize>) -> Constitution {
+		Constitution { id, name, parent_id }
+	}
+
+	#[test]
+	fn play_tree() {
+		let arena = &mut indextree::Arena::new();
+
+		let constitutions = vec![
+			cons(1, "root".into(), None),
+			cons(2, "a".into(), Some(1)),
+			cons(3, "b".into(), Some(1)),
+		];
+
+		let mut constitution_keys = vec![];
+		let mut constitution_node_ids = HashMap::new();
+		for constitution in constitutions.into_iter() {
+			constitution_keys.push((constitution.id, constitution.parent_id));
+			constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
+		}
+
+		let mut root_node_id = None;
+		for (id, parent_id) in constitution_keys {
+			let node_id = constitution_node_ids.get(&id).unwrap();
+			match (parent_id, root_node_id) {
+				(Some(parent_id), _) => {
+					match constitution_node_ids.get(&parent_id) {
+						Some(parent_node_id) => {
+							parent_node_id.append(*node_id, arena);
+						},
+						None => {
+							eprintln!("parent_id {:?} doesn't exist", parent_id);
+						},
+					}
+				},
+				(None, None) => {
+					println!("{:?}", node_id);
+					root_node_id = Some(node_id)
+				},
+				(None, Some(root_node_id)) => {
+					eprintln!("multiple root nodes: {:?}, {:?}", node_id, root_node_id);
+				}
+			}
+		}
+		let root_node_id = root_node_id.unwrap();
+
+		println!("{:?}", root_node_id.debug_pretty_print(&arena));
+	}
+
+
 	use super::*;
 	use AllocationType::*;
 
