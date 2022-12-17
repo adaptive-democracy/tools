@@ -173,6 +173,73 @@ impl Keyable<usize> for Constitution {
 	}
 }
 
+use indextree::{Arena, NodeId};
+
+#[derive(Debug)]
+enum CreateTreeError {
+	NoRoot,
+	MultipleRoots(NodeId, NodeId),
+	NonExistentParent(usize, usize),
+}
+
+fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<Constitution>, NodeId), CreateTreeError> {
+	let mut arena = Arena::new();
+
+	let mut constitution_keys = vec![];
+	let mut constitution_node_ids = HashMap::new();
+	for constitution in constitutions.into_iter() {
+		constitution_keys.push((constitution.id, constitution.parent_id));
+		constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
+	}
+
+	let mut root_node_id = None;
+	for (id, parent_id) in constitution_keys {
+		let node_id = constitution_node_ids.get(&id).unwrap();
+		match (parent_id, root_node_id) {
+			(Some(parent_id), _) => {
+				match constitution_node_ids.get(&parent_id) {
+					Some(parent_node_id) => {
+						parent_node_id.append(*node_id, &mut arena);
+					},
+					None => {
+						return Err(CreateTreeError::NonExistentParent(id, parent_id));
+					},
+				}
+			},
+			(None, None) => {
+				root_node_id = Some(node_id)
+			},
+			(None, Some(root_node_id)) => {
+				return Err(CreateTreeError::MultipleRoots(*root_node_id, *node_id));
+			}
+		}
+	}
+
+	match root_node_id {
+		Some(root_node_id) => Ok((arena, *root_node_id)),
+		None => Err(CreateTreeError::NoRoot),
+	}
+}
+
+
+#[derive(Debug)]
+enum ConstitutionChange {
+	Keep,
+	Delete,
+	Change {
+		new: Constitution,
+		new_children: Vec<Constitution>,
+	},
+}
+
+fn check_proposed_constitution() {
+	// when keep, we have to check none of the children are intended
+	// when delete, that implies all children are deleted
+	// when change, all children must have a change as well
+	// a change inherently has a root target, basically the level we're actually having an election for
+	unimplemented!()
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -181,46 +248,12 @@ mod tests {
 	}
 
 	#[test]
-	fn play_tree() {
-		let arena = &mut indextree::Arena::new();
-
-		let constitutions = vec![
+	fn test_create_constitution_tree() {
+		let (arena, root_node_id) = create_constitution_tree(vec![
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
-		];
-
-		let mut constitution_keys = vec![];
-		let mut constitution_node_ids = HashMap::new();
-		for constitution in constitutions.into_iter() {
-			constitution_keys.push((constitution.id, constitution.parent_id));
-			constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
-		}
-
-		let mut root_node_id = None;
-		for (id, parent_id) in constitution_keys {
-			let node_id = constitution_node_ids.get(&id).unwrap();
-			match (parent_id, root_node_id) {
-				(Some(parent_id), _) => {
-					match constitution_node_ids.get(&parent_id) {
-						Some(parent_node_id) => {
-							parent_node_id.append(*node_id, arena);
-						},
-						None => {
-							eprintln!("parent_id {:?} doesn't exist", parent_id);
-						},
-					}
-				},
-				(None, None) => {
-					println!("{:?}", node_id);
-					root_node_id = Some(node_id)
-				},
-				(None, Some(root_node_id)) => {
-					eprintln!("multiple root nodes: {:?}, {:?}", node_id, root_node_id);
-				}
-			}
-		}
-		let root_node_id = root_node_id.unwrap();
+		]).unwrap();
 
 		println!("{:?}", root_node_id.debug_pretty_print(&arena));
 	}
