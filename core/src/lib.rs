@@ -160,10 +160,11 @@ fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Alloca
 // }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq)]
 struct Constitution {
 	id: usize,
 	name: String,
+	// text: String, someday some governance code ast
 	parent_id: Option<usize>,
 }
 
@@ -182,7 +183,7 @@ enum CreateTreeError {
 	NonExistentParent(usize, usize),
 }
 
-fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<Constitution>, NodeId), CreateTreeError> {
+fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<Constitution>, NodeId, HashMap<usize, NodeId>), CreateTreeError> {
 	let mut arena = Arena::new();
 
 	let mut constitution_keys = vec![];
@@ -216,7 +217,7 @@ fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<C
 	}
 
 	match root_node_id {
-		Some(root_node_id) => Ok((arena, *root_node_id)),
+		Some(root_node_id) => Ok((arena, *root_node_id, constitution_node_ids)),
 		None => Err(CreateTreeError::NoRoot),
 	}
 }
@@ -232,7 +233,7 @@ enum ConstitutionChange {
 	},
 }
 
-fn check_proposed_constitution() {
+fn check_constitution_change() {
 	// when keep, we have to check none of the children are intended
 	// when delete, that implies all children are deleted
 	// when change, all children must have a change as well
@@ -249,15 +250,43 @@ mod tests {
 
 	#[test]
 	fn test_create_constitution_tree() {
-		let (arena, root_node_id) = create_constitution_tree(vec![
+		let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(vec![
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
 		]).unwrap();
 
-		println!("{:?}", root_node_id.debug_pretty_print(&arena));
+		assert_eq!(*arena.get(root_node_id).unwrap().get(), cons(1, "root".into(), None));
+
+		let mut iter = root_node_id.descendants(&arena);
+		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&1).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&2).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&3).unwrap()));
+		assert_eq!(iter.next(), None);
+
+		// println!("{:?}", root_node_id.debug_pretty_print(&arena));
 	}
 
+	// we need to be able to check a constitution change is valid
+	// and to apply a constitution change to create a new list of constitutions
+	#[test]
+	fn test_apply_constitution_change() {
+		// simply modifying the content of a constitution should not even be a "change" from this perspective?
+		// that would mean the *structural* aspects of the constitution would always be possibly present and "aside" from the content?
+		// certainly the *final* place you want to end up is a language that fully describes both the "content" and any substructure
+
+		let start = vec![
+			cons(1, "root".into(), None),
+			cons(2, "a".into(), Some(1)),
+			cons(3, "b".into(), Some(1)),
+		]
+
+		let finish = vec![
+			cons(1, "root".into(), None),
+			cons(2, "a".into(), Some(1)),
+			cons(3, "b".into(), Some(1)),
+		]
+	}
 
 	use super::*;
 	use AllocationType::*;

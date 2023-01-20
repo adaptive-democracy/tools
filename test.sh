@@ -1,3 +1,3 @@
 # PGPASSWORD='asdf' psql database -U user -h localhost -f main.sql | cat
 
-cargo test --package persistent-democracy-core play_tree -- --show-output
+cargo test --package persistent-democracy-core test_create_constitution_tree -- --show-output
