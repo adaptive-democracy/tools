@@ -4,11 +4,9 @@ use sycamore::prelude::*;
 fn App<G: Html>(cx: Scope) -> View<G> {
 	let names = create_signal(cx, vec![]);
 
-	fn push_name() {
-		names.set_fn
-
-		unimplemented!()
-	}
+	let push_name = || {
+		names.clone().set_fn_mut(|v| v.push("yo".to_string()));
+	};
 
 	let age = create_signal(cx, 0);
 
