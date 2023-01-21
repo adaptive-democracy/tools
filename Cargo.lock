@@ -116,21 +116,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c520e05135d6e763148b6426a837e239041653ba7becd2e538c076c738025fc"
 
 [[package]]
-name = "persistent-democracy-client"
+name = "persistent_democracy_client"
 version = "0.1.0"
 dependencies = [
+ "persistent_democracy_core",
  "sycamore",
 ]
 
 [[package]]
-name = "persistent-democracy-core"
+name = "persistent_democracy_core"
 version = "0.1.0"
 dependencies = [
  "indextree",
 ]
 
 [[package]]
-name = "persistent-democracy-server"
+name = "persistent_democracy_server"
 version = "0.1.0"
 
 [[package]]

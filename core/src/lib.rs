@@ -174,6 +174,18 @@ impl Keyable<usize> for Constitution {
 	}
 }
 
+#[derive(Debug)]
+struct ConstitutionView {
+	id: usize,
+	name: String,
+	children: Vec<ConstitutionView>,
+}
+
+fn constitution_view_to_db(constitutions: Vec<ConstitutionView>) -> Vec<Constitution> {
+	unimplemented!()
+}
+
+
 use indextree::{Arena, NodeId};
 
 #[derive(Debug)]
@@ -229,7 +241,7 @@ enum ConstitutionChange {
 	Delete,
 	Change {
 		new: Constitution,
-		new_children: Vec<Constitution>,
+		new_children: Option<Vec<Constitution>>,
 	},
 }
 
@@ -279,13 +291,13 @@ mod tests {
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
-		]
+		];
 
 		let finish = vec![
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
-		]
+		];
 	}
 
 	use super::*;

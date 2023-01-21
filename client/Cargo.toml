@@ -1,5 +1,5 @@
 [package]
-name = "persistent-democracy-client"
+name = "persistent_democracy_client"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 sycamore = { git = "https://github.com/sycamore-rs/sycamore", rev = "568b5b13c80b0296213901cf45c7669a6a496582" }
-# also need to add persistent-democracy-core using "../core"?
+persistent_democracy_core = { path = "../core" }
