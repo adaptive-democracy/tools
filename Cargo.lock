@@ -211,7 +211,7 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 [[package]]
 name = "sycamore"
 version = "0.8.2"
-source = "git+https://github.com/blainehansen/sycamore?rev=546a98889b37f5ebd8baf1dfb219533caeeeb83f#546a98889b37f5ebd8baf1dfb219533caeeeb83f"
+source = "git+https://github.com/blainehansen/sycamore?rev=4a246f2f249948ee9244eb90838d439531e01d9c#4a246f2f249948ee9244eb90838d439531e01d9c"
 dependencies = [
  "hashbrown 0.13.2",
  "indexmap",
@@ -228,7 +228,7 @@ dependencies = [
 [[package]]
 name = "sycamore-core"
 version = "0.8.2"
-source = "git+https://github.com/blainehansen/sycamore?rev=546a98889b37f5ebd8baf1dfb219533caeeeb83f#546a98889b37f5ebd8baf1dfb219533caeeeb83f"
+source = "git+https://github.com/blainehansen/sycamore?rev=4a246f2f249948ee9244eb90838d439531e01d9c#4a246f2f249948ee9244eb90838d439531e01d9c"
 dependencies = [
  "hashbrown 0.13.2",
  "sycamore-reactive",
@@ -237,7 +237,7 @@ dependencies = [
 [[package]]
 name = "sycamore-macro"
 version = "0.8.2"
-source = "git+https://github.com/blainehansen/sycamore?rev=546a98889b37f5ebd8baf1dfb219533caeeeb83f#546a98889b37f5ebd8baf1dfb219533caeeeb83f"
+source = "git+https://github.com/blainehansen/sycamore?rev=4a246f2f249948ee9244eb90838d439531e01d9c#4a246f2f249948ee9244eb90838d439531e01d9c"
 dependencies = [
  "once_cell",
  "proc-macro2",
@@ -249,7 +249,7 @@ dependencies = [
 [[package]]
 name = "sycamore-reactive"
 version = "0.8.1"
-source = "git+https://github.com/blainehansen/sycamore?rev=546a98889b37f5ebd8baf1dfb219533caeeeb83f#546a98889b37f5ebd8baf1dfb219533caeeeb83f"
+source = "git+https://github.com/blainehansen/sycamore?rev=4a246f2f249948ee9244eb90838d439531e01d9c#4a246f2f249948ee9244eb90838d439531e01d9c"
 dependencies = [
  "bumpalo",
  "getrandom",
@@ -262,7 +262,7 @@ dependencies = [
 [[package]]
 name = "sycamore-web"
 version = "0.8.2"
-source = "git+https://github.com/blainehansen/sycamore?rev=546a98889b37f5ebd8baf1dfb219533caeeeb83f#546a98889b37f5ebd8baf1dfb219533caeeeb83f"
+source = "git+https://github.com/blainehansen/sycamore?rev=4a246f2f249948ee9244eb90838d439531e01d9c#4a246f2f249948ee9244eb90838d439531e01d9c"
 dependencies = [
  "hashbrown 0.13.2",
  "html-escape",

@@ -160,7 +160,7 @@ fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Alloca
 // }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Constitution {
 	id: usize,
 	name: String,
@@ -195,7 +195,9 @@ enum CreateTreeError {
 	NonExistentParent(usize, usize),
 }
 
-fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<Constitution>, NodeId, HashMap<usize, NodeId>), CreateTreeError> {
+fn create_constitution_tree(
+	constitutions: Vec<Constitution>,
+) -> Result<(Arena<Constitution>, NodeId, HashMap<usize, NodeId>), CreateTreeError> {
 	let mut arena = Arena::new();
 
 	let mut constitution_keys = vec![];
@@ -236,22 +238,128 @@ fn create_constitution_tree(constitutions: Vec<Constitution>) -> Result<(Arena<C
 
 
 #[derive(Debug)]
-enum ConstitutionChange {
+enum ConstitutionMutation {
 	Keep,
 	Delete,
-	Change {
-		new: Constitution,
-		new_children: Option<Vec<Constitution>>,
-	},
+	Change(Constitution),
 }
 
 fn check_constitution_change() {
-	// when keep, we have to check none of the children are intended
-	// when delete, that implies all children are deleted
-	// when change, all children must have a change as well
-	// a change inherently has a root target, basically the level we're actually having an election for
 	unimplemented!()
 }
+
+
+#[derive(Debug)]
+enum ChangeError {
+	Misaligned,
+}
+
+fn apply_constitution_changes(
+	constitutions: Vec<Constitution>,
+	mutations: Vec<(usize, ConstitutionMutation)>,
+	additions: Vec<Constitution>,
+) -> Result<Vec<Constitution>, ChangeError> {
+	// if a constitution is deleted then all it's descendants must either be deleted or have their parent moved
+
+	// starting from the root node, we walk the tree
+	// for each node, we look up it's corresponding change (or the items in the tree are tuples of node/change)
+	// changes can be:
+	// - Keep, this constitution itself is unchanged. however children can still be changed, so we walk down
+	// - Delete. we walk all children and ensure all of them are either Delete or have their parent changed to a live node
+	// 		this probably means we should walk all the deletes *first*, and then process all normal changes after
+	// - Change. this can change any simple field, including changing the parent (which must be changed to something live).
+	// if you change a parent, you don't *necessarily* have to change its descendants, even if they all represent geographic areas
+
+	// separately apart from all these mutations there is a "new" constitution list, which must all point to live nodes after all mutations
+
+	// also have to check additions don't conflict with existing
+
+
+	let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(constitutions).map_err()?;
+
+	_apply_constitution_changes(current_node_id, arena, mutations, &mut live_consitution_ids, &mut next_constitutions)
+
+	for addition in additions {
+		constitution_node_ids.get(addition.parent_id?)
+	}
+
+
+	// if constitutions.len() != changes.len() {
+	// 	return Err(ChangeError::Misaligned)
+	// }
+
+	// let mut new_constitutions = vec![];
+	// for (constitution, change) in constitutions.iter().zip(changes.into_iter()) {
+	// 	use ConstitutionMutation::*;
+	// 	match change {
+	// 		Keep => {
+	// 			new_constitutions.push(constitution.clone());
+	// 		},
+	// 		Delete => {},
+	// 		Change{ new, new_children } => {
+	// 			if new.id != constitution.id || new.parent_id != constitution.parent_id {
+	// 				unimplemented!();
+	// 			}
+	// 			if let Some(_) = new_children {
+	// 				unimplemented!();
+	// 			}
+	// 			new_constitutions.push(new);
+	// 		},
+	// 	}
+	// };
+
+	// Ok(new_constitutions)
+}
+
+fn _apply_constitution_changes(
+	arena,
+	current_node_id,
+	mutations,
+	live_consitution_ids,
+	next_constitutions,
+) -> Result<> {
+	let current_constitution = arena.get(current_node_id)?.get();
+	match mutations.get(current_constitution.id)? {
+		Keep => {
+			live_consitution_ids.push(current_constitution.id);
+			next_constitutions.push(current_constitution.clone());
+		}
+		Delete => {
+			// TODO detach subtree
+			// walk all children and ensure they are deleted or change parents
+		}
+		Change(next_constitution) => {
+			if next_constitution.id != current_constitution.id {
+				return Err()
+			}
+			match (next_constitution.parent_id, current_constitution.parent_id) {
+				(Some(next_parent_id), Some(current_parent_id)) => {
+					if next_parent_id != current_parent_id {
+						current_node_id
+						// TODO move subtree
+					}
+				},
+				(Some(_), None) => {
+					unimplemented!();
+					// TODO attempting to move the root somewhere else
+				},
+				(None, Some(_)) => {
+					unimplemented!();
+					// TODO attempting to make something else the root
+				},
+				_ => {},
+			}
+
+			live_consitution_ids.push(next_constitution.id);
+			next_constitutions.push(next_constitution);
+		}
+	}
+
+	for child_node_id in current_node_id.children(arena) {
+		_apply_constitution_changes(child_node_id, arena, mutations, live_consitution_ids, next_constitutions)
+	}
+}
+
 
 
 #[cfg(test)]
@@ -275,29 +383,87 @@ mod tests {
 		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&2).unwrap()));
 		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&3).unwrap()));
 		assert_eq!(iter.next(), None);
-
-		// println!("{:?}", root_node_id.debug_pretty_print(&arena));
+		// println!("{:?}\n", root_node_id.debug_pretty_print(&arena));
 	}
 
-	// we need to be able to check a constitution change is valid
-	// and to apply a constitution change to create a new list of constitutions
+
 	#[test]
-	fn test_apply_constitution_change() {
-		// simply modifying the content of a constitution should not even be a "change" from this perspective?
-		// that would mean the *structural* aspects of the constitution would always be possibly present and "aside" from the content?
-		// certainly the *final* place you want to end up is a language that fully describes both the "content" and any substructure
+	fn test_create_constitution_tree_detach() {
+		let mut arena = Arena::new();
+		let root = arena.new_node("root");
+		let a = arena.new_node("a");
+		let b = arena.new_node("b");
+		root.append(a, &mut arena);
+		root.append(b, &mut arena);
+		let a1 = arena.new_node("a1");
+		let a2 = arena.new_node("a2");
+		a.append(a1, &mut arena);
+		a.append(a2, &mut arena);
+		assert_eq!(root.descendants(&arena).collect::<Vec<NodeId>>(), vec![
+			root, a, a1, a2, b,
+		]);
 
-		let start = vec![
+		a.detach(&mut arena);
+		assert_eq!(root.descendants(&arena).collect::<Vec<NodeId>>(), vec![
+			root, b,
+		]);
+
+		b.append(a, &mut arena);
+		assert_eq!(root.descendants(&arena).collect::<Vec<NodeId>>(), vec![
+			root, b, a, a1, a2,
+		]);
+	}
+
+	#[test]
+	fn test_apply_constitution_changes() {
+		let before = vec![
 			cons(1, "root".into(), None),
+
 			cons(2, "a".into(), Some(1)),
-			cons(3, "b".into(), Some(1)),
+			cons(3, "a_1".into(), Some(2)),
+			cons(4, "a_2".into(), Some(2)),
+
+			cons(5, "b".into(), Some(1)),
+			cons(6, "b_1".into(), Some(5)),
+			cons(7, "b_2".into(), Some(5)),
 		];
 
-		let finish = vec![
-			cons(1, "root".into(), None),
-			cons(2, "a".into(), Some(1)),
-			cons(3, "b".into(), Some(1)),
+		let mutations = HashMap::from([
+			(1, ConstitutionMutation::Keep),
+
+			(2, ConstitutionMutation::Delete),
+			(3, ConstitutionMutation::Change(cons(3, "1_3".into(), Some(5)))),
+			(4, ConstitutionMutation::Delete),
+
+			(5, ConstitutionMutation::Change(cons(5, "1".into(), Some(1)))),
+			(6, ConstitutionMutation::Change(cons(6, "1_1".into(), Some(5)))),
+			(7, ConstitutionMutation::Change(cons(7, "1_2".into(), Some(5)))),
+		]);
+		let additions = vec![
+			cons(8, "2".into(), Some(1)),
+			cons(9, "2_1".into(), Some(8)),
+			cons(10, "2_2".into(), Some(8)),
+			cons(11, "2_3".into(), Some(8)),
 		];
+
+		let expected = vec![
+			cons(1, "root".into(), None),
+
+			cons(5, "1".into(), Some(1)),
+			cons(6, "1_1".into(), Some(5)),
+			cons(7, "1_2".into(), Some(5)),
+			cons(3, "1_3".into(), Some(5)),
+
+			cons(8, "2".into(), Some(1)),
+			cons(9, "2_1".into(), Some(8)),
+			cons(10, "2_2".into(), Some(8)),
+			cons(11, "2_3".into(), Some(8)),
+		];
+
+		let after = apply_constitution_changes(&before, mutations, additions).unwrap();
+		assert_eq!(after, expected);
+
+		// TODO guard against trivial cases: delete all, keep all
 	}
 
 	use super::*;
