@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 trait Keyable<K> {
 	fn key(&self) -> K;
@@ -251,15 +251,53 @@ fn check_constitution_change() {
 
 #[derive(Debug)]
 enum ChangeError {
-	Misaligned,
+	MissingMutation(usize),
+	NextTreeInvalid(CreateTreeError)
 }
 
 fn apply_constitution_changes(
 	constitutions: Vec<Constitution>,
-	mutations: Vec<(usize, ConstitutionMutation)>,
+	mutations: HashMap<usize, ConstitutionMutation>,
 	additions: Vec<Constitution>,
 ) -> Result<Vec<Constitution>, ChangeError> {
-	// if a constitution is deleted then all it's descendants must either be deleted or have their parent moved
+	// let live_constitution_ids: HashSet<usize> =
+	// 	constitutions.iter().map(|c| c.id)
+	// 	.chain(additions.iter().map(|a| a.id))
+	// 	.collect();
+
+	// let dead_constitution_ids: HashSet<usize> = mutations.iter().filter_map(|(id, m)| match m {
+	// 	ConstitutionMutation::Delete => Some(*id),
+	// 	_ => None,
+	// }).collect();
+	// let live_constitution_ids = live_constitution_ids.difference(&dead_constitution_ids);
+
+	let mut next_constitutions = vec![];
+	for constitution in constitutions.into_iter() {
+		let mutation = mutations.get(&constitution.id).ok_or_else(|| ChangeError::MissingMutation(constitution.id))?;
+		match mutation {
+			Keep => { next_constitutions.append(constitution); },
+			Delete => { dead_constitution_ids.append(constitution.id); },
+			Change(next_constitution) => {
+
+			},
+		}
+
+		next_constitutions.append();
+	}
+	next_constitutions.extend(additions);
+
+	// let all_constitutions = [constitutions, additions].concat();
+	// let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(all_constitutions.clone())
+	// 	.map_err(ChangeError::NextTreeInvalid)?;
+
+	// _apply_constitution_changes(current_node_id, arena, mutations, &mut live_constitution_ids, &mut next_constitutions);
+
+	// Ok(all_constitutions);
+
+	unimplemented!()
+
+
+	// if a constitution is deleted then all its descendants must either be deleted or have their parent moved
 
 	// starting from the root node, we walk the tree
 	// for each node, we look up it's corresponding change (or the items in the tree are tuples of node/change)
@@ -274,91 +312,58 @@ fn apply_constitution_changes(
 
 	// also have to check additions don't conflict with existing
 
-
-	let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(constitutions).map_err()?;
-
-	_apply_constitution_changes(current_node_id, arena, mutations, &mut live_consitution_ids, &mut next_constitutions)
-
-	for addition in additions {
-		constitution_node_ids.get(addition.parent_id?)
-	}
-
-
-	// if constitutions.len() != changes.len() {
-	// 	return Err(ChangeError::Misaligned)
-	// }
-
-	// let mut new_constitutions = vec![];
-	// for (constitution, change) in constitutions.iter().zip(changes.into_iter()) {
-	// 	use ConstitutionMutation::*;
-	// 	match change {
-	// 		Keep => {
-	// 			new_constitutions.push(constitution.clone());
-	// 		},
-	// 		Delete => {},
-	// 		Change{ new, new_children } => {
-	// 			if new.id != constitution.id || new.parent_id != constitution.parent_id {
-	// 				unimplemented!();
-	// 			}
-	// 			if let Some(_) = new_children {
-	// 				unimplemented!();
-	// 			}
-	// 			new_constitutions.push(new);
-	// 		},
-	// 	}
-	// };
-
-	// Ok(new_constitutions)
 }
 
-fn _apply_constitution_changes(
-	arena,
-	current_node_id,
-	mutations,
-	live_consitution_ids,
-	next_constitutions,
-) -> Result<> {
-	let current_constitution = arena.get(current_node_id)?.get();
-	match mutations.get(current_constitution.id)? {
-		Keep => {
-			live_consitution_ids.push(current_constitution.id);
-			next_constitutions.push(current_constitution.clone());
-		}
-		Delete => {
-			// TODO detach subtree
-			// walk all children and ensure they are deleted or change parents
-		}
-		Change(next_constitution) => {
-			if next_constitution.id != current_constitution.id {
-				return Err()
-			}
-			match (next_constitution.parent_id, current_constitution.parent_id) {
-				(Some(next_parent_id), Some(current_parent_id)) => {
-					if next_parent_id != current_parent_id {
-						current_node_id
-						// TODO move subtree
-					}
-				},
-				(Some(_), None) => {
-					unimplemented!();
-					// TODO attempting to move the root somewhere else
-				},
-				(None, Some(_)) => {
-					unimplemented!();
-					// TODO attempting to make something else the root
-				},
-				_ => {},
-			}
+// fn _apply_constitution_changes(
+// 	arena,
+// 	current_node_id,
+// 	mutations,
+// 	live_constitution_ids,
+// 	next_constitutions,
+// ) -> Result<> {
+// 	use ConstitutionMutation::*;
 
-			live_consitution_ids.push(next_constitution.id);
-			next_constitutions.push(next_constitution);
-		}
-	}
+// 	let current_constitution = arena.get(current_node_id)?.get();
+// 	match mutations.get(current_constitution.id)? {
+// 		Keep => {
+// 			live_constitution_ids.push(current_constitution.id);
+// 			next_constitutions.push(current_constitution.clone());
+// 		}
+// 		Delete => {
+// 			// TODO detach subtree
+// 			// walk all children and ensure they are deleted or change parents
+// 		}
+// 		Change(next_constitution) => {
+// 			if next_constitution.id != current_constitution.id {
+// 				return Err()
+// 			}
+// 			match (next_constitution.parent_id, current_constitution.parent_id) {
+// 				(Some(next_parent_id), Some(current_parent_id)) => {
+// 					if next_parent_id != current_parent_id {
+// 						current_node_id
+// 						// TODO move subtree
+// 					}
+// 				},
+// 				(Some(_), None) => {
+// 					unimplemented!();
+// 					// TODO attempting to move the root somewhere else
+// 				},
+// 				(None, Some(_)) => {
+// 					unimplemented!();
+// 					// TODO attempting to make something else the root
+// 				},
+// 				_ => {},
+// 			}
 
-	for child_node_id in current_node_id.children(arena) {
-		_apply_constitution_changes(child_node_id, arena, mutations, live_consitution_ids, next_constitutions)
-	}
-}
+// 			live_constitution_ids.push(next_constitution.id);
+// 			next_constitutions.push(next_constitution);
+// 		}
+// 	}
+
+// 	for child_node_id in current_node_id.children(arena) {
+// 		_apply_constitution_changes(child_node_id, arena, mutations, live_constitution_ids, next_constitutions)
+// 	}
+// }
 
 
 
@@ -460,7 +465,7 @@ mod tests {
 			cons(11, "2_3".into(), Some(8)),
 		];
 
-		let after = apply_constitution_changes(&before, mutations, additions).unwrap();
+		let after = apply_constitution_changes(before, mutations, additions).unwrap();
 		assert_eq!(after, expected);
 
 		// TODO guard against trivial cases: delete all, keep all
