@@ -161,11 +161,11 @@ fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Alloca
 
 
 #[derive(Debug, Clone, PartialEq)]
-struct Constitution {
-	id: usize,
-	name: String,
+pub struct Constitution {
+	pub id: usize,
+	pub name: String,
 	// text: String, someday some governance code ast
-	parent_id: Option<usize>,
+	pub parent_id: Option<usize>,
 }
 
 impl Keyable<usize> for Constitution {
@@ -195,44 +195,51 @@ enum CreateTreeError {
 	NonExistentParent(usize, usize),
 }
 
-fn create_constitution_tree(
-	constitutions: Vec<Constitution>,
-) -> Result<(Arena<Constitution>, NodeId, HashMap<usize, NodeId>), CreateTreeError> {
-	let mut arena = Arena::new();
+#[derive(Debug)]
+struct ConstitutionTree {
+	arena: Arena<Constitution>,
+	root_node_id: NodeId, // INVARIANT: root_node_id must point into arena
+	constitution_node_ids: HashMap<usize, NodeId>, // INVARIANT: node_ids must point into arena
+}
 
-	let mut constitution_keys = vec![];
-	let mut constitution_node_ids = HashMap::new();
-	for constitution in constitutions.into_iter() {
-		constitution_keys.push((constitution.id, constitution.parent_id));
-		constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
-	}
+impl ConstitutionTree {
+	fn from_vec(constitutions: Vec<Constitution>) -> Result<ConstitutionTree, CreateTreeError> {
+		let mut arena = Arena::new();
 
-	let mut root_node_id = None;
-	for (id, parent_id) in constitution_keys {
-		let node_id = constitution_node_ids.get(&id).unwrap();
-		match (parent_id, root_node_id) {
-			(Some(parent_id), _) => {
-				match constitution_node_ids.get(&parent_id) {
-					Some(parent_node_id) => {
-						parent_node_id.append(*node_id, &mut arena);
-					},
-					None => {
-						return Err(CreateTreeError::NonExistentParent(id, parent_id));
-					},
+		let mut constitution_keys = vec![];
+		let mut constitution_node_ids = HashMap::new();
+		for constitution in constitutions.into_iter() {
+			constitution_keys.push((constitution.id, constitution.parent_id));
+			constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
+		}
+
+		let mut root_node_id = None;
+		for (id, parent_id) in constitution_keys {
+			let node_id = *constitution_node_ids.get(&id).unwrap();
+			match (parent_id, root_node_id) {
+				(Some(parent_id), _) => {
+					match constitution_node_ids.get(&parent_id) {
+						Some(parent_node_id) => {
+							parent_node_id.append(node_id, &mut arena);
+						},
+						None => {
+							return Err(CreateTreeError::NonExistentParent(id, parent_id));
+						},
+					}
+				},
+				(None, None) => {
+					root_node_id = Some(node_id)
+				},
+				(None, Some(root_node_id)) => {
+					return Err(CreateTreeError::MultipleRoots(root_node_id, node_id));
 				}
-			},
-			(None, None) => {
-				root_node_id = Some(node_id)
-			},
-			(None, Some(root_node_id)) => {
-				return Err(CreateTreeError::MultipleRoots(*root_node_id, *node_id));
 			}
 		}
-	}
 
-	match root_node_id {
-		Some(root_node_id) => Ok((arena, *root_node_id, constitution_node_ids)),
-		None => Err(CreateTreeError::NoRoot),
+		match root_node_id {
+			Some(root_node_id) => Ok(ConstitutionTree{arena, root_node_id, constitution_node_ids}),
+			None => Err(CreateTreeError::NoRoot),
+		}
 	}
 }
 
@@ -255,71 +262,78 @@ enum ChangeError {
 	NextTreeInvalid(CreateTreeError)
 }
 
-fn apply_constitution_changes(
-	constitutions: Vec<Constitution>,
-	mutations: HashMap<usize, ConstitutionMutation>,
-	additions: Vec<Constitution>,
-) -> Result<Vec<Constitution>, ChangeError> {
-	// let live_constitution_ids: HashSet<usize> =
-	// 	constitutions.iter().map(|c| c.id)
-	// 	.chain(additions.iter().map(|a| a.id))
-	// 	.collect();
 
-	// let dead_constitution_ids: HashSet<usize> = mutations.iter().filter_map(|(id, m)| match m {
-	// 	ConstitutionMutation::Delete => Some(*id),
-	// 	_ => None,
-	// }).collect();
-	// let live_constitution_ids = live_constitution_ids.difference(&dead_constitution_ids);
-
-	let mut next_constitutions = vec![];
-	for constitution in constitutions.into_iter() {
-		let mutation = mutations.get(&constitution.id).ok_or_else(|| ChangeError::MissingMutation(constitution.id))?;
-		match mutation {
-			Keep => { next_constitutions.append(constitution); },
-			Delete => { dead_constitution_ids.append(constitution.id); },
-			Change(next_constitution) => {
-
-			},
-		}
-
-		next_constitutions.append();
-	}
-	next_constitutions.extend(additions);
-
-	// let all_constitutions = [constitutions, additions].concat();
-	// let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(all_constitutions.clone())
-	// 	.map_err(ChangeError::NextTreeInvalid)?;
-
-	// _apply_constitution_changes(current_node_id, arena, mutations, &mut live_constitution_ids, &mut next_constitutions);
-
-	// Ok(all_constitutions);
-
-	unimplemented!()
+// fn apply_constitution_change(arg: Type) -> RetType {
+// 	unimplemented!()
+// }
 
 
-	// if a constitution is deleted then all its descendants must either be deleted or have their parent moved
 
-	// starting from the root node, we walk the tree
-	// for each node, we look up it's corresponding change (or the items in the tree are tuples of node/change)
-	// changes can be:
-	// - Keep, this constitution itself is unchanged. however children can still be changed, so we walk down
-	// - Delete. we walk all children and ensure all of them are either Delete or have their parent changed to a live node
-	// 		this probably means we should walk all the deletes *first*, and then process all normal changes after
-	// - Change. this can change any simple field, including changing the parent (which must be changed to something live).
-	// if you change a parent, you don't *necessarily* have to change its descendants, even if they all represent geographic areas
+// fn apply_constitution_changes(
+// 	constitutions: Vec<Constitution>,
+// 	mutations: HashMap<usize, ConstitutionMutation>,
+// 	additions: Vec<Constitution>,
+// ) -> Result<Vec<Constitution>, ChangeError> {
+// 	// let live_constitution_ids: HashSet<usize> =
+// 	// 	constitutions.iter().map(|c| c.id)
+// 	// 	.chain(additions.iter().map(|a| a.id))
+// 	// 	.collect();
 
-	// separately apart from all these mutations there is a "new" constitution list, which must all point to live nodes after all mutations
+// 	// let dead_constitution_ids: HashSet<usize> = mutations.iter().filter_map(|(id, m)| match m {
+// 	// 	ConstitutionMutation::Delete => Some(*id),
+// 	// 	_ => None,
+// 	// }).collect();
+// 	// let live_constitution_ids = live_constitution_ids.difference(&dead_constitution_ids);
 
-	// also have to check additions don't conflict with existing
+// 	// for constitution in constitutions.into_iter() {
+// 	// 	let mutation = mutations.get(&constitution.id).ok_or_else(|| ChangeError::MissingMutation(constitution.id))?;
+// 	// 	match mutation {
+// 	// 		Keep => { next_constitutions.append(constitution); },
+// 	// 		Delete => { dead_constitution_ids.append(constitution.id); },
+// 	// 		Change(next_constitution) => {
 
-}
+// 	// 		},
+// 	// 	}
+
+// 	// 	next_constitutions.append();
+// 	// }
+// 	// next_constitutions.extend(additions);
+
+// 	let all_constitutions = [constitutions, additions].concat();
+// 	let mut next_constitutions = vec![];
+// 	let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(all_constitutions.clone())
+// 		.map_err(ChangeError::NextTreeInvalid)?;
+
+// 	let current_node_id = root_node_id;
+// 	_apply_constitution_changes(current_node_id, arena, mutations, &mut live_constitution_ids, &mut next_constitutions);
+
+// 	unimplemented!();
+// 	// Ok(all_constitutions);
+
+// 	// if a constitution is deleted then all its descendants must either be deleted or have their parent moved
+
+// 	// starting from the root node, we walk the tree
+// 	// for each node, we look up it's corresponding change (or the items in the tree are tuples of node/change)
+// 	// changes can be:
+// 	// - Keep, this constitution itself is unchanged. however children can still be changed, so we walk down
+// 	// - Delete. we walk all children and ensure all of them are either Delete or have their parent changed to a live node
+// 	// 		this probably means we should walk all the deletes *first*, and then process all normal changes after
+// 	// - Change. this can change any simple field, including changing the parent (which must be changed to something live).
+// 	// if you change a parent, you don't *necessarily* have to change its descendants, even if they all represent geographic areas
+
+// 	// separately apart from all these mutations there is a "new" constitution list, which must all point to live nodes after all mutations
+
+// 	// also have to check additions don't conflict with existing
+
+// }
 
 // fn _apply_constitution_changes(
-// 	arena,
-// 	current_node_id,
-// 	mutations,
-// 	live_constitution_ids,
-// 	next_constitutions,
+// 	arena: Arena,
+// 	current_node_id: NodeId,
+// 	mutations: HashMap<usize, ConstitutionMutation>,
+// 	// additions: Vec<Constitution>,
+// 	live_constitution_ids: &mut Vec<usize>,
+// 	next_constitutions: &mut Vec<usize>,
 // ) -> Result<> {
 // 	use ConstitutionMutation::*;
 
@@ -374,19 +388,19 @@ mod tests {
 	}
 
 	#[test]
-	fn test_create_constitution_tree() {
-		let (arena, root_node_id, constitution_node_ids) = create_constitution_tree(vec![
+	fn test_constitution_tree_from_vec() {
+		let constitution_tree = ConstitutionTree::from_vec(vec![
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
 		]).unwrap();
 
-		assert_eq!(*arena.get(root_node_id).unwrap().get(), cons(1, "root".into(), None));
+		assert_eq!(*constitution_tree.arena.get(constitution_tree.root_node_id).unwrap().get(), cons(1, "root".into(), None));
 
-		let mut iter = root_node_id.descendants(&arena);
-		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&1).unwrap()));
-		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&2).unwrap()));
-		assert_eq!(iter.next(), Some(*constitution_node_ids.get(&3).unwrap()));
+		let mut iter = constitution_tree.root_node_id.descendants(&constitution_tree.arena);
+		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&1).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&2).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&3).unwrap()));
 		assert_eq!(iter.next(), None);
 		// println!("{:?}\n", root_node_id.debug_pretty_print(&arena));
 	}
@@ -419,57 +433,57 @@ mod tests {
 		]);
 	}
 
-	#[test]
-	fn test_apply_constitution_changes() {
-		let before = vec![
-			cons(1, "root".into(), None),
+	// #[test]
+	// fn test_apply_constitution_changes() {
+	// 	let before = vec![
+	// 		cons(1, "root".into(), None),
 
-			cons(2, "a".into(), Some(1)),
-			cons(3, "a_1".into(), Some(2)),
-			cons(4, "a_2".into(), Some(2)),
+	// 		cons(2, "a".into(), Some(1)),
+	// 		cons(3, "a_1".into(), Some(2)),
+	// 		cons(4, "a_2".into(), Some(2)),
 
-			cons(5, "b".into(), Some(1)),
-			cons(6, "b_1".into(), Some(5)),
-			cons(7, "b_2".into(), Some(5)),
-		];
+	// 		cons(5, "b".into(), Some(1)),
+	// 		cons(6, "b_1".into(), Some(5)),
+	// 		cons(7, "b_2".into(), Some(5)),
+	// 	];
 
-		let mutations = HashMap::from([
-			(1, ConstitutionMutation::Keep),
+	// 	let mutations = HashMap::from([
+	// 		(1, ConstitutionMutation::Keep),
 
-			(2, ConstitutionMutation::Delete),
-			(3, ConstitutionMutation::Change(cons(3, "1_3".into(), Some(5)))),
-			(4, ConstitutionMutation::Delete),
+	// 		(2, ConstitutionMutation::Delete),
+	// 		(3, ConstitutionMutation::Change(cons(3, "1_3".into(), Some(5)))),
+	// 		(4, ConstitutionMutation::Delete),
 
-			(5, ConstitutionMutation::Change(cons(5, "1".into(), Some(1)))),
-			(6, ConstitutionMutation::Change(cons(6, "1_1".into(), Some(5)))),
-			(7, ConstitutionMutation::Change(cons(7, "1_2".into(), Some(5)))),
-		]);
-		let additions = vec![
-			cons(8, "2".into(), Some(1)),
-			cons(9, "2_1".into(), Some(8)),
-			cons(10, "2_2".into(), Some(8)),
-			cons(11, "2_3".into(), Some(8)),
-		];
+	// 		(5, ConstitutionMutation::Change(cons(5, "1".into(), Some(1)))),
+	// 		(6, ConstitutionMutation::Change(cons(6, "1_1".into(), Some(5)))),
+	// 		(7, ConstitutionMutation::Change(cons(7, "1_2".into(), Some(5)))),
+	// 	]);
+	// 	let additions = vec![
+	// 		cons(8, "2".into(), Some(1)),
+	// 		cons(9, "2_1".into(), Some(8)),
+	// 		cons(10, "2_2".into(), Some(8)),
+	// 		cons(11, "2_3".into(), Some(8)),
+	// 	];
 
-		let expected = vec![
-			cons(1, "root".into(), None),
+	// 	let expected = vec![
+	// 		cons(1, "root".into(), None),
 
-			cons(5, "1".into(), Some(1)),
-			cons(6, "1_1".into(), Some(5)),
-			cons(7, "1_2".into(), Some(5)),
-			cons(3, "1_3".into(), Some(5)),
+	// 		cons(5, "1".into(), Some(1)),
+	// 		cons(6, "1_1".into(), Some(5)),
+	// 		cons(7, "1_2".into(), Some(5)),
+	// 		cons(3, "1_3".into(), Some(5)),
 
-			cons(8, "2".into(), Some(1)),
-			cons(9, "2_1".into(), Some(8)),
-			cons(10, "2_2".into(), Some(8)),
-			cons(11, "2_3".into(), Some(8)),
-		];
+	// 		cons(8, "2".into(), Some(1)),
+	// 		cons(9, "2_1".into(), Some(8)),
+	// 		cons(10, "2_2".into(), Some(8)),
+	// 		cons(11, "2_3".into(), Some(8)),
+	// 	];
 
-		let after = apply_constitution_changes(before, mutations, additions).unwrap();
-		assert_eq!(after, expected);
+	// 	let after = apply_constitution_changes(before, mutations, additions).unwrap();
+	// 	assert_eq!(after, expected);
 
-		// TODO guard against trivial cases: delete all, keep all
-	}
+	// 	// TODO guard against trivial cases: delete all, keep all
+	// }
 
 	use super::*;
 	use AllocationType::*;
@@ -507,9 +521,6 @@ mod tests {
 			.map(|c| (c.key(), c.stabilization_bucket.unwrap_or(0.0)))
 			.collect();
 		dbg!(candidacy_map);
-
-
-
 
 		let candidacy_vec = vec![
 			cand((1, 1), None),
