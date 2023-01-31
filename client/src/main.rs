@@ -1,6 +1,5 @@
 use sycamore::prelude::*;
-use sycamore::web::web_sys;
-use sycamore::rt::JsValue;
+use sycamore::web::{web_sys, wasm_bindgen::JsValue};
 // use sycamore::builder::ElementBuilderOrView;
 use persistent_democracy_core::{Constitution};
 
