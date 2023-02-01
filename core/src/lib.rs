@@ -1,17 +1,23 @@
-use std::collections::{HashMap, HashSet};
+// use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
+use std::hash::Hash;
 
-trait Keyable<K> {
+pub trait Keyable<K> {
 	fn key(&self) -> K;
 }
 
-fn index<T: Keyable<K>, K: Eq + std::hash::Hash>(items: Vec<T>) -> HashMap<K, T> {
+pub trait ParentKeyable<K> {
+	fn parent_key(&self) -> Option<K>;
+}
+
+pub fn index<T: Keyable<K>, K: Eq + Hash>(items: Vec<T>) -> HashMap<K, T> {
 	items.into_iter()
 		.map(|item| (item.key(), item))
 		.collect()
 }
 
 
-fn insert_or_conflict<T: Clone, K: Eq + std::hash::Hash>(indexed: &mut HashMap<K, T>, key: K, item: T) -> Result<(), (K, T, T)> {
+pub fn insert_or_conflict<T: Clone, K: Eq + Hash>(indexed: &mut HashMap<K, T>, key: K, item: T) -> Result<(), (K, T, T)> {
 	match indexed.get(&key) {
 		Some(existing_item) => Err((key, item, existing_item.clone())),
 		None => {
@@ -21,7 +27,7 @@ fn insert_or_conflict<T: Clone, K: Eq + std::hash::Hash>(indexed: &mut HashMap<K
 	}
 }
 
-fn index_with_conflicts<T: Keyable<K> + Clone, K: Copy + Eq + std::hash::Hash>(items: Vec<T>) -> (HashMap<K, T>, Vec<(K, T, T)>) {
+pub fn index_with_conflicts<T: Keyable<K> + Clone, K: Copy + Eq + Hash>(items: Vec<T>) -> (HashMap<K, T>, Vec<(K, T, T)>) {
 	let mut indexed: HashMap<K, T> = HashMap::new();
 	let mut conflicts = vec![];
 	for item in items.into_iter() {
@@ -35,7 +41,7 @@ fn index_with_conflicts<T: Keyable<K> + Clone, K: Copy + Eq + std::hash::Hash>(i
 
 
 #[derive(Debug)]
-struct HistoryVec<T> {
+pub struct HistoryVec<T> {
 	history: Vec<T>,
 	current: T,
 }
@@ -53,7 +59,7 @@ impl <T> HistoryVec<T> {
 }
 
 
-fn step_histories<T, K: std::hash::Hash, F: Fn(&T) -> T>(
+pub fn step_histories<T, K: Hash, F: Fn(&T) -> T>(
 	histories: &mut HashMap<K, HistoryVec<T>>,
 	step_fn: F,
 ) {
@@ -68,19 +74,19 @@ type Weight = f32;
 // TODO make id wrapper for different id?
 
 #[derive(Debug)]
-struct Person {
+pub struct Person {
 	id: usize,
 	name: String,
 }
 
 #[derive(Debug)]
-struct Election {
+pub struct Election {
 	id: usize,
 	title: String,
 }
 
 #[derive(Debug)]
-struct Candidacy {
+pub struct Candidacy {
 	election_id: usize,
 	candidate_id: usize,
 	stabilization_bucket: Option<Weight>,
@@ -94,13 +100,13 @@ impl Keyable<(usize, usize)> for Candidacy {
 
 
 #[derive(Debug)]
-enum AllocationType {
+pub enum AllocationType {
 	For,
 	Against,
 }
 
 #[derive(Debug)]
-struct Allocation {
+pub struct Allocation {
 	voter_id: usize,
 	election_id: usize,
 	candidate_id: usize,
@@ -128,7 +134,7 @@ impl Allocation {
 
 
 
-fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Allocation>) -> HashMap<(usize, usize), Weight> {
+pub fn compute_total_votes(candidacy_vec: Vec<Candidacy>, allocation_vec: Vec<Allocation>) -> HashMap<(usize, usize), Weight> {
 	// let invalid_allocation_vec = vec![];
 	// let duplicate_candidacy_vec = vec![];
 
@@ -169,61 +175,92 @@ pub struct Constitution {
 }
 
 impl Keyable<usize> for Constitution {
-	fn key(&self) -> usize {
-		self.id
-	}
+	fn key(&self) -> usize { self.id }
 }
 
-#[derive(Debug)]
-struct ConstitutionView {
-	id: usize,
-	name: String,
-	children: Vec<ConstitutionView>,
+impl ParentKeyable<usize> for Constitution {
+	fn parent_key(&self) -> Option<usize> { self.parent_id }
 }
 
-fn constitution_view_to_db(constitutions: Vec<ConstitutionView>) -> Vec<Constitution> {
-	unimplemented!()
-}
+// #[derive(Debug)]
+// struct ConstitutionView {
+// 	id: usize,
+// 	name: String,
+// 	children: Vec<ConstitutionView>,
+// }
+
+// fn constitution_view_to_db(constitutions: Vec<ConstitutionView>) -> Vec<Constitution> {
+// 	unimplemented!()
+// }
 
 
 use indextree::{Arena, NodeId};
 
 #[derive(Debug)]
-enum CreateTreeError {
+pub enum CreateTreeError<K> {
 	NoRoot,
 	MultipleRoots(NodeId, NodeId),
-	NonExistentParent(usize, usize),
+	NonExistentParent(K, K),
 }
 
 #[derive(Debug)]
-struct ConstitutionTree {
-	arena: Arena<Constitution>,
+pub struct Tree<K, T> {
+	arena: Arena<T>,
 	root_node_id: NodeId, // INVARIANT: root_node_id must point into arena
-	constitution_node_ids: HashMap<usize, NodeId>, // INVARIANT: node_ids must point into arena
+	node_ids: HashMap<K, NodeId>, // INVARIANT: node_ids must point into arena
 }
 
-impl ConstitutionTree {
-	fn from_vec(constitutions: Vec<Constitution>) -> Result<ConstitutionTree, CreateTreeError> {
+#[derive(Debug)]
+pub struct SubTree<'t, T> {
+	arena: &'t Arena<T>,
+	pub item: &'t T,
+	node_id: NodeId,
+}
+
+
+impl<K, T> Tree<K, T> {
+	pub fn root_sub_tree<'t>(&'t self) -> SubTree<'t, T> {
+		SubTree::new(&self.arena, self.root_node_id)
+	}
+}
+
+impl<'t, T> SubTree<'t, T> {
+	fn new(arena: &'t Arena<T>, node_id: NodeId) -> SubTree<'t, T> {
+		let item = arena.get(node_id).unwrap().get();
+		SubTree{arena, item, node_id}
+	}
+
+	pub fn children(&'t self) -> impl Iterator<Item=SubTree<'t, T>> {
+		self.node_id.children(&self.arena).map(|node_id| SubTree::new(&self.arena, node_id))
+	}
+}
+
+impl<K: Copy + Eq + Hash, T: Keyable<K> + ParentKeyable<K>> Tree<K, T> {
+	pub fn from_vec(
+		items: Vec<T>,
+	) -> Result<Tree<K, T>, CreateTreeError<K>> {
 		let mut arena = Arena::new();
 
-		let mut constitution_keys = vec![];
-		let mut constitution_node_ids = HashMap::new();
-		for constitution in constitutions.into_iter() {
-			constitution_keys.push((constitution.id, constitution.parent_id));
-			constitution_node_ids.insert(constitution.id, arena.new_node(constitution));
+		let mut keys = vec![];
+		let mut node_ids = HashMap::new();
+		for item in items.into_iter() {
+			let key = item.key();
+			let parent_key = item.parent_key();
+			keys.push((key, parent_key));
+			node_ids.insert(key, arena.new_node(item));
 		}
 
 		let mut root_node_id = None;
-		for (id, parent_id) in constitution_keys {
-			let node_id = *constitution_node_ids.get(&id).unwrap();
-			match (parent_id, root_node_id) {
-				(Some(parent_id), _) => {
-					match constitution_node_ids.get(&parent_id) {
+		for (key, parent_key) in keys {
+			let node_id = *node_ids.get(&key).unwrap();
+			match (parent_key, root_node_id) {
+				(Some(parent_key), _) => {
+					match node_ids.get(&parent_key) {
 						Some(parent_node_id) => {
 							parent_node_id.append(node_id, &mut arena);
 						},
 						None => {
-							return Err(CreateTreeError::NonExistentParent(id, parent_id));
+							return Err(CreateTreeError::NonExistentParent(key, parent_key));
 						},
 					}
 				},
@@ -237,30 +274,30 @@ impl ConstitutionTree {
 		}
 
 		match root_node_id {
-			Some(root_node_id) => Ok(ConstitutionTree{arena, root_node_id, constitution_node_ids}),
+			Some(root_node_id) => Ok(Tree{arena, root_node_id, node_ids}),
 			None => Err(CreateTreeError::NoRoot),
 		}
 	}
 }
 
 
-#[derive(Debug)]
-enum ConstitutionMutation {
-	Keep,
-	Delete,
-	Change(Constitution),
-}
+// #[derive(Debug)]
+// enum ConstitutionMutation {
+// 	Keep,
+// 	Delete,
+// 	Change(Constitution),
+// }
 
-fn check_constitution_change() {
-	unimplemented!()
-}
+// fn check_constitution_change() {
+// 	unimplemented!()
+// }
 
 
-#[derive(Debug)]
-enum ChangeError {
-	MissingMutation(usize),
-	NextTreeInvalid(CreateTreeError)
-}
+// #[derive(Debug)]
+// enum ChangeError<K> {
+// 	MissingMutation(usize),
+// 	NextTreeInvalid(CreateTreeError<K>)
+// }
 
 
 // fn apply_constitution_change(arg: Type) -> RetType {
@@ -389,7 +426,7 @@ mod tests {
 
 	#[test]
 	fn test_constitution_tree_from_vec() {
-		let constitution_tree = ConstitutionTree::from_vec(vec![
+		let constitution_tree = Tree::from_vec(vec![
 			cons(1, "root".into(), None),
 			cons(2, "a".into(), Some(1)),
 			cons(3, "b".into(), Some(1)),
@@ -398,9 +435,9 @@ mod tests {
 		assert_eq!(*constitution_tree.arena.get(constitution_tree.root_node_id).unwrap().get(), cons(1, "root".into(), None));
 
 		let mut iter = constitution_tree.root_node_id.descendants(&constitution_tree.arena);
-		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&1).unwrap()));
-		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&2).unwrap()));
-		assert_eq!(iter.next(), Some(*constitution_tree.constitution_node_ids.get(&3).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_tree.node_ids.get(&1).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_tree.node_ids.get(&2).unwrap()));
+		assert_eq!(iter.next(), Some(*constitution_tree.node_ids.get(&3).unwrap()));
 		assert_eq!(iter.next(), None);
 		// println!("{:?}\n", root_node_id.debug_pretty_print(&arena));
 	}
