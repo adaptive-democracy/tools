@@ -1,8 +1,29 @@
 use uuid::Uuid;
 use sycamore::prelude::*;
 use sycamore::web::{web_sys, wasm_bindgen::JsValue};
-// use sycamore::builder::ElementBuilderOrView;
+use sycamore_router::{Route, Router, HistoryIntegration, /*navigate*/};
 // use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
+
+// use reqwasm::http::Request;
+// use serde::{Deserialize, Serialize};
+
+// // API that counts visits to the web-page
+// const API_BASE_URL: &str = "https://api.countapi.xyz/hit";
+
+// #[derive(Debug, Serialize, Deserialize)]
+// struct Visits {
+// 	value: u64,
+// }
+
+// async fn fetch_visits(id: &str) -> Result<Visits, reqwasm::Error> {
+// 	let url = format!("{}/{}/hits", API_BASE_URL, id);
+// 	let resp = Request::get(&url).send().await?;
+
+// 	let body = resp.json::<Visits>().await?;
+// 	Ok(body)
+// }
+
+type Weight = f64;
 
 fn log_str(s: &'static str) {
 	web_sys::console::log_1(&JsValue::from_str(s));
@@ -11,13 +32,21 @@ fn log<T: Into<JsValue>>(value: T) {
 	web_sys::console::log_1(&value.into());
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Constitution {
 	id: Uuid,
 	title: RcSignal<String>,
 	text: RcSignal<String>,
 	sub_constitutions: RcSignal<Vec<Constitution>>,
+	// sub_elections: RcSignal<Vec<Election>>,
 }
+
+// #[derive(Clone, PartialEq)]
+// struct Election {
+// 	id: Uuid,
+// 	title: RcSignal<String>,
+// 	candidates: RcSignal<Vec<String>>,
+// }
 
 impl Constitution {
 	fn new_using(title: String, text: String) -> Constitution {
@@ -47,14 +76,6 @@ impl Constitution {
 			sub_constitution.to_db_recursive(db_constitutions, current_id);
 		}
 	}
-}
-
-#[derive(Debug)]
-struct ConstitutionDb {
-	id: Uuid,
-	title: String,
-	text: String,
-	parent_id: Option<Uuid>,
 }
 
 #[component]
@@ -98,7 +119,7 @@ fn ConstitutionView<'s, G: Html>(
 	};
 
 	view!{cx,
-		div(style="border: solid; padding: 2px;") {
+		div(class="border p-2") {
 			p { input(bind:value=constitution.title, placeholder="constitution title") }
 			p { textarea(bind:value=constitution.text, placeholder="constitution text") }
 
@@ -120,6 +141,102 @@ fn ConstitutionView<'s, G: Html>(
 }
 
 
-fn main() {
-	sycamore::render(|cx| view!{cx, App{} });
+
+#[derive(Route)]
+enum AppRoutes {
+	#[to("/")]
+	Index,
+
+	// the current user's info, containing their allocations and candidacies and constitution drafts
+	// this page probably needs some "state" concept, so other pages can navigate here with the intent to perform some particular action
+	#[to("/me")]
+	Me,
+
+	// the constitution tree explorer
+	#[to("/constitution")]
+	ConstitutionTree,
+
+	// the constitution tree editor, where users can edit constitutions and
+	#[to("/constitution/draft/<id>")]
+	ConstitutionDraft(Uuid),
+
+	// #[to("/constitution/draft/<next>/compare/<prev>")]
+	// ConstitutionCompare(Uuid, Uuid),
+
+	// some particular constitution, with its current election
+	#[to("/constitution/<id>")]
+	Constitution(Uuid),
+
+	// some particular election
+	#[to("/election/<id>")]
+	Election(Uuid),
+
+	#[not_found]
+	NotFound,
 }
+
+
+fn main() {
+	sycamore::render(|cx| view!{cx,
+		Router(
+			integration=HistoryIntegration::new(),
+			view=|cx, route: &ReadSignal<AppRoutes>| {
+				view!{cx,
+					div(class="app") {
+						(match route.get().as_ref() {
+							AppRoutes::Index => view!{cx,
+								App{}
+							},
+							AppRoutes::Me => view!{cx, "Me" },
+							AppRoutes::ConstitutionTree => view!{cx, "ConstitutionTree" },
+							AppRoutes::ConstitutionDraft(_) => view!{cx, "ConstitutionDraft" },
+							// AppRoutes::ConstitutionCompare => view!{cx, "ConstitutionCompare" },
+							AppRoutes::Constitution(_) => view!{cx, "Constitution" },
+							AppRoutes::Election(_) => view!{cx, "Election" },
+							AppRoutes::NotFound => view!{cx, "NotFound" },
+						})
+					}
+				}
+			}
+		)
+	});
+}
+
+
+
+#[derive(Debug)]
+struct ConstitutionDb {
+	id: Uuid,
+	title: String,
+	text: String,
+	parent_id: Option<Uuid>,
+}
+
+// #[derive(Debug)]
+// struct ElectionDb {
+// 	id: Uuid,
+// 	title: String,
+// 	constitution_id: Uuid,
+// }
+
+// #[derive(Debug)]
+// struct CandidacyDb {
+// 	election_id: Uuid,
+// 	candidate_id: Uuid,
+// 	stabilization_bucket: Weight,
+// }
+
+// #[derive(Debug)]
+// enum AllocationType {
+// 	For,
+// 	Against,
+// }
+
+// #[derive(Debug)]
+// struct AllocationDb {
+// 	voter_id: Uuid,
+// 	election_id: Uuid,
+// 	candidate_id: Uuid,
+// 	weight: Weight,
+// 	type: AllocationType,
+// }
