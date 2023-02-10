@@ -1,7 +1,8 @@
+use uuid::Uuid;
 use sycamore::prelude::*;
 use sycamore::web::{web_sys, wasm_bindgen::JsValue};
 // use sycamore::builder::ElementBuilderOrView;
-use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
+// use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
 
 fn log_str(s: &'static str) {
 	web_sys::console::log_1(&JsValue::from_str(s));
@@ -11,141 +12,112 @@ fn log<T: Into<JsValue>>(value: T) {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct ConstitutionRx {
-	id: usize,
-	name: RcSignal<String>,
-	// parent_id: Option<RcSignal<usize>>,
-	parent_id: Option<usize>,
-}
-impl Keyable<usize> for ConstitutionRx {
-	fn key(&self) -> usize { self.id }
+struct Constitution {
+	id: Uuid,
+	title: RcSignal<String>,
+	text: RcSignal<String>,
+	sub_constitutions: RcSignal<Vec<Constitution>>,
 }
 
-impl ParentKeyable<usize> for ConstitutionRx {
-	fn parent_key(&self) -> Option<usize> { self.parent_id }
-}
+impl Constitution {
+	fn new_using(title: String, text: String) -> Constitution {
+		let id = Uuid::new_v4();
+		let title = create_rc_signal(title);
+		let text = create_rc_signal(text);
+		let sub_constitutions = create_rc_signal(Vec::new());
+		Constitution{id, title, text, sub_constitutions}
+	}
 
-impl From<ConstitutionRx> for Constitution {
-	fn from(c: ConstitutionRx) -> Self {
-		Constitution{id: c.id, name: c.name.get().to_string(), parent_id: c.parent_id}
+	fn to_db(&self) -> Vec<ConstitutionDb> {
+		let mut db_constitutions = vec![];
+		self.to_db_recursive(&mut db_constitutions, None);
+		db_constitutions
+	}
+
+	fn to_db_recursive(&self, db_constitutions: &mut Vec<ConstitutionDb>, parent_id: Option<Uuid>) {
+		db_constitutions.push(ConstitutionDb{
+			id: self.id.clone(),
+			title: self.title.to_string(),
+			text: self.text.to_string(),
+			parent_id,
+		});
+
+		let current_id = Some(self.id);
+		for sub_constitution in &*self.sub_constitutions.get_untracked() {
+			sub_constitution.to_db_recursive(db_constitutions, current_id);
+		}
 	}
 }
 
-impl From<Constitution> for ConstitutionRx {
-	fn from(c: Constitution) -> Self {
-		ConstitutionRx{id: c.id, name: create_rc_signal(c.name), parent_id: c.parent_id}
-	}
+#[derive(Debug)]
+struct ConstitutionDb {
+	id: Uuid,
+	title: String,
+	text: String,
+	parent_id: Option<Uuid>,
 }
 
 #[component]
 fn App<G: Html>(cx: Scope) -> View<G> {
-	let constitutions = create_signal(cx, vec![
-		ConstitutionRx{ id: 1, name: create_rc_signal("initial root".into()), parent_id: None },
-	]);
-	// let id_counter = Rc::new(1);
-	let mut id_counter = 1;
-
-	let sub_tree_result = constitutions.map(cx, |c| Tree::from_vec(c.clone()));
-	// let sub_tree_result = tree_result.map(cx, |r| r.as_ref().map(move |t| Tree::root_sub_tree(t)));
-	// let sub_tree_result = create_memo(cx, || {
-	// 	(tree_result.get()).map(|t| Tree::root_sub_tree(&t))
-	// });
-
-	let push_constitution = |name: String, parent_id: usize| {
-		let id = id_counter;
-		id_counter += 1;
-		constitutions.modify().push(ConstitutionRx{id, name: create_rc_signal(name), parent_id: Some(parent_id)});
-	};
-	let remove_constitution = |id: usize| {
-		constitutions.modify().retain(|c| c.id != id);
-	};
-	// modification of parent is easy
-
-	let next_name = create_signal(cx, String::new());
-	let handle_enter = |event: web_sys::KeyboardEvent| {
-		if event.code() != "Enter" {
-			return
+	let root_constitution = create_ref(cx, Constitution::new_using("root".into(), String::new()));
+	let save_constitutions = |_| {
+		let db_constitutions = root_constitution.to_db();
+		for db_constitution in db_constitutions {
+			log(format!("{:?}", db_constitution.id));
+			log(format!("{:?}", db_constitution.title));
+			log(format!("{:?}", db_constitution.text));
+			log(format!("{:?}", db_constitution.parent_id));
+			log("");
 		}
-		let constitution = ConstitutionRx{ id: 1, name: create_rc_signal(next_name.get().as_ref().into()), parent_id: None };
-		constitutions.modify().push(constitution);
-		next_name.modify().clear();
 	};
 
 	view!{cx,
-		(match sub_tree_result.borrow() {
-			Err(_) => view!{cx, "problem while building tree" },
-			Ok(sub_tree) => {
-				// let  = tree.root_sub_tree();
-				view!{cx,
-					p { (sub_tree.item.name.get()) }
-					// Indexed(
-					// 	iterable=sub_tree.children(),
-					// 	view=|cx, c| view!{cx,
+		ConstitutionView(constitution=root_constitution)
 
-					// 	}
-					// )
-				}
-			},
-		})
-
-		// ConstitutionSubTreeView(sub_tree=sub_tree)
-
-		// p { "Mutable version" }
-		// Keyed(
-		// 	iterable=constitutions,
-		// 	key=|c| c.id,
-		// 	view=|cx, c| view!{cx,
-		// 		p {
-		// 			input(bind:value=c.name)
-		// 		}
-		// 	}
-		// )
-		// p { input(bind:value=next_name, on:keyup=handle_enter) }
-
-		// p { "Immutable version" }
-		// Keyed(
-		// 	iterable=constitutions,
-		// 	key=|c| c.id,
-		// 	view=|cx, c| view!{cx,
-		// 		p { (c.name.get()) }
-		// 	}
-		// )
+		div { button(on:click=save_constitutions) { "save constitutions" } }
 	}
 }
 
-// #[component(inline_props)]
-// fn ConstitutionRxView<'a, 'b: 'a, G: Html>(
-// 	cx: Scope<'a>,
-// 	&'a constitution: ConstitutionRx<'b>,
-// ) -> View<G> {
-// 	let name = &constitution.name;
-// 	view!{cx,
-// 		input(bind:value=name, on:keyup=|e| &handle_enter(cx, e))
-// 	}
-// }
+#[component(inline_props)]
+fn ConstitutionView<'s, G: Html>(
+	cx: Scope<'s>,
+	constitution: &'s Constitution,
+) -> View<G> {
+	let new_title = create_signal(cx, String::new());
+	let new_text = create_signal(cx, String::new());
 
-// #[component(inline_props)]
-// fn ConstitutionTreeView<'a, G: Html>(
-// 	cx: Scope<'a>,
-// 	constitutions: &'a ReadSignal<Vec<Constitution>>,
+	let push_constitution = |_| {
+		let mut new_title = new_title.modify();
+		let mut new_text = new_text.modify();
+		constitution.sub_constitutions.modify().push(Constitution::new_using(
+			new_title.to_string(),
+			new_text.to_string(),
+		));
+		new_title.clear();
+		new_text.clear();
+	};
 
-// ) -> View<G> {
+	view!{cx,
+		div(style="border: solid; padding: 2px;") {
+			p { input(bind:value=constitution.title, placeholder="constitution title") }
+			p { textarea(bind:value=constitution.text, placeholder="constitution text") }
 
-// 	view!{cx,
-// 		// Keyed(
-// 		Indexed(
-// 			iterable=current_node_id.children(arena.get()),
-// 			// key=|c| c.id,
-// 			view=|cx, c| view!{cx,
+			(if constitution.sub_constitutions.get().len() == 0 {
+				view!{cx, p { "no children" } }
+			} else { view!{cx,
+				Keyed(
+					iterable=&constitution.sub_constitutions,
+					key=|c| c.id,
+					view=|cx, sub_constitution| view!{cx, ConstitutionView(constitution=create_ref(cx, sub_constitution)) },
+				)
+			} })
 
-// 			}
-// 		)
-
-// 		// p {
-// 		// 	input(bind:value=next_name, on:keyup=handle_enter)
-// 		// }
-// 	}
-// }
+			div { input(bind:value=new_title, placeholder="child constitution title") }
+			div { textarea(bind:value=new_text, placeholder="child constitution text") }
+			div { button(on:click=push_constitution) { "add child constitution" } }
+		}
+	}
+}
 
 
 fn main() {
