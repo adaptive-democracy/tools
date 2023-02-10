@@ -1,0 +1,4 @@
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "npx tailwindcss --config styles/tailwind.config.js --minify -i styles/main.css -o styles/tailwind.css"]
