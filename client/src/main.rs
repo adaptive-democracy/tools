@@ -187,13 +187,13 @@ fn main() {
 							AppRoutes::Index => view!{cx,
 								App{}
 							},
-							AppRoutes::Me => view!{cx, "Me" },
-							AppRoutes::ConstitutionTree => view!{cx, "ConstitutionTree" },
-							AppRoutes::ConstitutionDraft(_) => view!{cx, "ConstitutionDraft" },
-							// AppRoutes::ConstitutionCompare => view!{cx, "ConstitutionCompare" },
-							AppRoutes::Constitution(_) => view!{cx, "Constitution" },
-							AppRoutes::Election(_) => view!{cx, "Election" },
-							AppRoutes::NotFound => view!{cx, "NotFound" },
+							AppRoutes::Me => view!{cx, Me{} },
+							AppRoutes::ConstitutionTree => view!{cx, ConstitutionTree{} },
+							AppRoutes::ConstitutionDraft(_) => view!{cx, ConstitutionDraft{} },
+							// AppRoutes::ConstitutionCompare => view!{cx, ConstitutionCompare{} },
+							AppRoutes::Constitution(_) => view!{cx, Constitution{} },
+							AppRoutes::Election(_) => view!{cx, Election{} },
+							AppRoutes::NotFound => view!{cx, NotFound{} },
 						})
 					}
 				}
@@ -203,6 +203,41 @@ fn main() {
 }
 
 
+
+#[component]
+fn Me<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "Me"}
+}
+
+#[component]
+fn ConstitutionTree<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "ConstitutionTree"}
+}
+
+#[component]
+fn ConstitutionDraft<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "ConstitutionDraft"}
+}
+
+#[component]
+fn ConstitutionCompare<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "ConstitutionCompare"}
+}
+
+#[component]
+fn Constitution<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "Constitution"}
+}
+
+#[component]
+fn Election<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "Election"}
+}
+
+#[component]
+fn NotFound<G: Html>(cx: Scope) -> View<G> {
+	view!{cx, "NotFound" }
+}
 
 #[derive(Debug)]
 struct ConstitutionDb {
