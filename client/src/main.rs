@@ -4,26 +4,9 @@ use sycamore::web::{web_sys, wasm_bindgen::JsValue};
 use sycamore_router::{Route, Router, HistoryIntegration, /*navigate*/};
 // use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
 
-// use reqwasm::http::Request;
-// use serde::{Deserialize, Serialize};
-
-// // API that counts visits to the web-page
-// const API_BASE_URL: &str = "https://api.countapi.xyz/hit";
-
-// #[derive(Debug, Serialize, Deserialize)]
-// struct Visits {
-// 	value: u64,
-// }
-
-// async fn fetch_visits(id: &str) -> Result<Visits, reqwasm::Error> {
-// 	let url = format!("{}/{}/hits", API_BASE_URL, id);
-// 	let resp = Request::get(&url).send().await?;
-
-// 	let body = resp.json::<Visits>().await?;
-// 	Ok(body)
-// }
-
 type Weight = f64;
+
+const API_BASE_URL: &str = "https://api.countapi.xyz/hit";
 
 fn log_str(s: &'static str) {
 	web_sys::console::log_1(&JsValue::from_str(s));
@@ -175,6 +158,7 @@ enum AppRoutes {
 	NotFound,
 }
 
+mod election;
 
 fn main() {
 	sycamore::render(|cx| view!{cx,
@@ -192,7 +176,7 @@ fn main() {
 							AppRoutes::ConstitutionDraft(_) => view!{cx, ConstitutionDraft{} },
 							// AppRoutes::ConstitutionCompare => view!{cx, ConstitutionCompare{} },
 							AppRoutes::Constitution(_) => view!{cx, Constitution{} },
-							AppRoutes::Election(_) => view!{cx, Election{} },
+							AppRoutes::Election(id) => view!{cx, election::Election(id=*id) },
 							AppRoutes::NotFound => view!{cx, NotFound{} },
 						})
 					}
@@ -227,11 +211,6 @@ fn ConstitutionCompare<G: Html>(cx: Scope) -> View<G> {
 #[component]
 fn Constitution<G: Html>(cx: Scope) -> View<G> {
 	view!{cx, "Constitution"}
-}
-
-#[component]
-fn Election<G: Html>(cx: Scope) -> View<G> {
-	view!{cx, "Election"}
 }
 
 #[component]
@@ -275,3 +254,24 @@ struct ConstitutionDb {
 // 	weight: Weight,
 // 	type: AllocationType,
 // }
+
+pub mod utils {
+	use std::future::Future;
+	use sycamore::prelude::*;
+
+	pub fn create_async_signal<'s, U: 'static, F>(cx: Scope<'s>, f: F) -> &'s Signal<Option<U>>
+	where
+			F: Future<Output = U> + 's,
+	{
+		let signal = create_signal(cx, None);
+
+		sycamore::futures::spawn_local_scoped(cx, {
+			let signal = signal.clone();
+			async move {
+				signal.set(Some(f.await));
+			}
+		});
+
+		signal
+	}
+}
