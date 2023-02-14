@@ -11,7 +11,8 @@ edition = "2021"
 # sycamore = { git = "https://github.com/blainehansen/sycamore", rev = "4a246f2f249948ee9244eb90838d439531e01d9c" }
 sycamore = { path = "../../sycamore/packages/sycamore", features = ["sycamore-futures"] }
 sycamore-router = { path = "../../sycamore/packages/sycamore-router" }
-reqwasm = "0.5"
-serde = "1"
+gloo-net = { version = "0.2", features = ["http", "json"] }
+gloo-timers = { version = "0.2", features = ["futures"] }
+serde = { version = "1", features = ["derive"] }
 
 uuid = { version = "1.3", features = ["v4", "fast-rng", "serde"] }

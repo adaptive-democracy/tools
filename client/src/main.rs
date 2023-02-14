@@ -1,19 +1,17 @@
 use uuid::Uuid;
 use sycamore::prelude::*;
-use sycamore::web::{web_sys, wasm_bindgen::JsValue};
 use sycamore_router::{Route, Router, HistoryIntegration, /*navigate*/};
 // use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
 
 type Weight = f64;
 
-const API_BASE_URL: &str = "https://api.countapi.xyz/hit";
+// TODO use env PROFILE=debug|release instead of debug_assertions?
+// https://doc.rust-lang.org/cargo/reference/environment-variables.html
+// #[cfg(debug_assertions)]
+// const API_BASE_URL: &str = "https://localhost::5050";
 
-fn log_str(s: &'static str) {
-	web_sys::console::log_1(&JsValue::from_str(s));
-}
-fn log<T: Into<JsValue>>(value: T) {
-	web_sys::console::log_1(&value.into());
-}
+#[cfg(not(debug_assertions))]
+const API_BASE_URL: &str = env!("API_BASE_URL", "need to specify API_BASE_URL when compiling for release");
 
 #[derive(Clone, PartialEq)]
 struct Constitution {
@@ -67,11 +65,11 @@ fn App<G: Html>(cx: Scope) -> View<G> {
 	let save_constitutions = |_| {
 		let db_constitutions = root_constitution.to_db();
 		for db_constitution in db_constitutions {
-			log(format!("{:?}", db_constitution.id));
-			log(format!("{:?}", db_constitution.title));
-			log(format!("{:?}", db_constitution.text));
-			log(format!("{:?}", db_constitution.parent_id));
-			log("");
+			utils::log(format!("{:?}", db_constitution.id));
+			utils::log(format!("{:?}", db_constitution.title));
+			utils::log(format!("{:?}", db_constitution.text));
+			utils::log(format!("{:?}", db_constitution.parent_id));
+			utils::log("");
 		}
 	};
 
@@ -176,7 +174,7 @@ fn main() {
 							AppRoutes::ConstitutionDraft(_) => view!{cx, ConstitutionDraft{} },
 							// AppRoutes::ConstitutionCompare => view!{cx, ConstitutionCompare{} },
 							AppRoutes::Constitution(_) => view!{cx, Constitution{} },
-							AppRoutes::Election(id) => view!{cx, election::Election(id=*id) },
+							AppRoutes::Election(id) => view!{cx, election::ElectionView(id=*id) },
 							AppRoutes::NotFound => view!{cx, NotFound{} },
 						})
 					}
@@ -273,5 +271,13 @@ pub mod utils {
 		});
 
 		signal
+	}
+
+	use sycamore::web::{web_sys, wasm_bindgen::JsValue};
+	pub fn log_str(s: &'static str) {
+		web_sys::console::log_1(&JsValue::from_str(s));
+	}
+	pub fn log<T: Into<JsValue>>(value: T) {
+		web_sys::console::log_1(&value.into());
 	}
 }
