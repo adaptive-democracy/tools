@@ -14,11 +14,11 @@ type Weight = f64;
 const API_BASE_URL: &str = env!("API_BASE_URL", "need to specify API_BASE_URL when compiling for release");
 
 #[derive(Clone, PartialEq)]
-struct Constitution {
+struct ConstitutionEdit {
 	id: Uuid,
 	title: RcSignal<String>,
 	text: RcSignal<String>,
-	sub_constitutions: RcSignal<Vec<Constitution>>,
+	sub_constitutions: RcSignal<Vec<ConstitutionEdit>>,
 	// sub_elections: RcSignal<Vec<Election>>,
 }
 
@@ -29,13 +29,13 @@ struct Constitution {
 // 	candidates: RcSignal<Vec<String>>,
 // }
 
-impl Constitution {
-	fn new_using(title: String, text: String) -> Constitution {
+impl ConstitutionEdit {
+	fn new_using(title: String, text: String) -> ConstitutionEdit {
 		let id = Uuid::new_v4();
 		let title = create_rc_signal(title);
 		let text = create_rc_signal(text);
 		let sub_constitutions = create_rc_signal(Vec::new());
-		Constitution{id, title, text, sub_constitutions}
+		ConstitutionEdit{id, title, text, sub_constitutions}
 	}
 
 	fn to_db(&self) -> Vec<ConstitutionDb> {
@@ -61,7 +61,7 @@ impl Constitution {
 
 #[component]
 fn App<G: Html>(cx: Scope) -> View<G> {
-	let root_constitution = create_ref(cx, Constitution::new_using("root".into(), String::new()));
+	let root_constitution = create_ref(cx, ConstitutionEdit::new_using("root".into(), String::new()));
 	let save_constitutions = |_| {
 		let db_constitutions = root_constitution.to_db();
 		for db_constitution in db_constitutions {
@@ -156,6 +156,8 @@ enum AppRoutes {
 	NotFound,
 }
 
+// TODO add some sort of `to_href` method to `Route` trait, create a Link component that accepts a tag name
+
 mod election;
 
 fn main() {
@@ -173,7 +175,7 @@ fn main() {
 							AppRoutes::ConstitutionTree => view!{cx, ConstitutionTree{} },
 							AppRoutes::ConstitutionDraft(_) => view!{cx, ConstitutionDraft{} },
 							// AppRoutes::ConstitutionCompare => view!{cx, ConstitutionCompare{} },
-							AppRoutes::Constitution(_) => view!{cx, Constitution{} },
+							AppRoutes::Constitution(id) => view!{cx, election::ConstitutionView(id=*id) },
 							AppRoutes::Election(id) => view!{cx, election::ElectionView(id=*id) },
 							AppRoutes::NotFound => view!{cx, NotFound{} },
 						})

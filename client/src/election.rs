@@ -4,13 +4,82 @@ use sycamore::prelude::*;
 
 use crate::Weight;
 
+// the document table has a composite primary key of (id, document_status), and an enacted_between timestamp range
+// there is a constraint ensuring enacted_between is only non-null if document_status is enacted
+// there is a unique constraint ensuring there is only
+
+// https://github.com/graphql-rust/graphql-client
+// https://cynic-rs.dev/manual-http-requests.html
+
+#[derive(Debug)]
+struct Election<T> {
+	current_winner: Option<WinningCandidacy<T>>,
+	candidates: Vec<RunningCandidacy<T>>,
+	// allocated_for_weight: Option<Weight>,
+	// allocated_against_weight: Option<Weight>,
+}
+
+#[derive(Debug)]
+struct WinningCandidacy {
+	id: Uuid,
+	current_weight: Weight,
+}
+
+#[derive(Debug)]
+struct RunningCandidacy {
+	id: Uuid,
+	current_weight: Weight,
+	stabilization_bucket: Weight,
+	// status: CandidacyStatus(nomination_bucket: Weight | stabilization_bucket: Weight)
+}
+
+#[derive(Debug)]
+struct Office {
+	id: Uuid,
+	title: String,
+	description: String,
+}
+
+type OfficeElection = Election<Office>;
+
+// type Date = chrono::DateTime<chrono::Utc>;
+
+#[derive(Debug)]
+enum DocumentStatus {
+	// Enacted(Date),
+	Enacted,
+	// PreviouslyEnacted(sqlx::postgres::types::PgRange<Date>),
+	// PreviouslyEnacted(Date, Date),
+	// for both of these statuses, the id of the document matches the one this is intended to replace
+	// Candidate{ candidacy_id: Uuid }, // this candidacy_id links all the documents of a tree together
+	Candidate,
+	Draft,
+}
+
+#[derive(Debug)]
+struct Document {
+	id: Uuid,
+	title: String,
+	text: String,
+	sub_documents: Vec<Document>,
+	sub_offices: Vec<Office>,
+}
+impl ElectionAble for Document {
+	type WinningVersion = Document;
+	type CandidateVersion = Person;
+}
+
+type DocumentElection = Election<Document>;
+
+
+
 #[derive(Debug, Deserialize)]
 struct Election {
 	id: Uuid,
 	title: String,
 	description: String,
-	current_winner: Option<WinningCandidate>,
-	candidates: Vec<RunningCandidate>,
+	current_winner: Option<WinningPersonCandidate>,
+	candidates: Vec<RunningPersonCandidate>,
 	// in a quadratic range election the *election* has an allocation rather than the candidates
 	// allocated_for_weight: Option<Weight>,
 	// allocated_against_weight: Option<Weight>,
@@ -23,7 +92,7 @@ struct Person {
 }
 
 #[derive(Debug, Deserialize)]
-struct WinningCandidate {
+struct WinningPersonCandidate {
 	person: Person,
 	current_weight: Weight,
 	my_allocation: Option<Allocation>,
@@ -31,7 +100,7 @@ struct WinningCandidate {
 }
 
 #[derive(Debug, Deserialize)]
-struct RunningCandidate {
+struct RunningPersonCandidate {
 	person: Person,
 	stabilization_bucket: Weight,
 	current_weight: Weight,
@@ -40,7 +109,6 @@ struct RunningCandidate {
 
 #[derive(Debug, Deserialize)]
 struct Allocation {
-	// candidate_id: Uuid,
 	weight: Weight,
 	preference_direction: PreferenceDirection,
 }
@@ -88,7 +156,7 @@ pub fn ElectionView<G: Html>(cx: Scope, id: Uuid) -> View<G> {
 			Some(Err(err)) => view!{cx, h1 { "An error occurred!" } div { (format!("{:?}", err)) } },
 
 			Some(Ok(election)) => view!{cx,
-				h1 { (election.title) }
+				h1 { a(href=format!("{:?}", )) (election.title) }
 				p { (election.description) }
 
 				(if let Some(current_winner) = &election.current_winner {
@@ -120,6 +188,69 @@ fn MyAllocation<'s, G: Html>(cx: Scope<'s>, my_allocation: &'s Option<Allocation
 }
 
 #[component(inline_props)]
+fn ConstitutionLink<'s, G: Html>(cx: Scope<'s>, constitution: &'s Constitution) -> View<G> {
+	view!{cx, a(href=format!("/constitution/{}", constitution.id)) { (constitution.title) } }
+}
+
+#[component(inline_props)]
+fn ElectionLink<'s, G: Html>(cx: Scope<'s>, election: &'s Election) -> View<G> {
+	view!{cx, a(href=format!("/election/{}", election.id)) { (election.title) } }
+}
+
+#[component(inline_props)]
 fn PersonLink<'s, G: Html>(cx: Scope<'s>, person: &'s Person) -> View<G> {
 	view!{cx, a(href=format!("/person/{}", person.id)) { (person.name) } }
+}
+
+
+
+
+
+#[derive(Clone, PartialEq)]
+struct Constitution {
+	id: Uuid,
+	title: String,
+	text: String,
+	sub_constitutions: Vec<Constitution>,
+	sub_elections: Vec<Election>,
+	candidate_competitors: Vec<ConstitutionCandidate>,
+}
+
+#[derive(Debug)]
+struct ConstitutionCandidate {
+	text: String,
+	sub_constitutions: Vec<ConstitutionCandidate>,
+	sub_elections: Vec<ElectionCandidate>,
+
+	stabilization_bucket: Weight,
+	current_weight: Weight,
+	my_allocation: Option<Allocation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ElectionCandidate {
+	title: String,
+	description: String,
+}
+
+
+
+async fn fetch_constitution(_id: Uuid) -> Result<Constitution, gloo_net::Error> {
+	gloo_timers::future::TimeoutFuture::new(500).await;
+	unimplemented!()
+}
+
+// async fn fetch_constitution(id: Uuid) -> Result<Constitution, gloo_net::Error> {
+// 	use gloo_net::http::Request;
+// 	use crate::API_BASE_URL;
+// 	let url = format!("{API_BASE_URL}/constitution/{id}");
+// 	let body =
+// 		Request::get(&url).send().await?
+// 		.json::<Constitution>().await?;
+// 	Ok(body)
+// }
+
+#[component(inline_props)]
+pub fn ConstitutionView<G: Html>(cx: Scope, id: Uuid) -> View<G> {
+	let constitution = crate::utils::create_async_signal(cx, fetch_constitution(id));
 }

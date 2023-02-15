@@ -8,76 +8,102 @@ comment on schema public is 'standard public schema';
 -- https://github.com/arkhipov/temporal_tables
 -- https://github.com/tcdi/pgx
 
-
--- in this simplified model there are three essential types of elections:
--- - for a person
--- - for an opaque document
--- - for a constitution, which recursively defines a set of elections
+create table person (
+	id uuid primary key,
+	"name" text not null
+);
 
 -- to get the current set of elections you must select the current tree of constitutions and join them to their child
 
-select
-from
-	constitution
-	join election
-where instituted_during @> current_timestamp
-;
+-- select
+-- from
+-- 	constitution
+-- 	join election
+-- where enacted_during @> current_timestamp
+-- ;
+
+-- https://www.postgresql.org/docs/15/rangetypes.html
+-- exclude using gist (room_id WITH =, enacted_during WITH &&)
+
+-- tstzrange(previous_ending, null, '[)')
 
 
+create type election_type as enum('DOCUMENT', 'OFFICE');
 
-create table constitution (
-	id serial primary key,
-	_election_type election_type not null check(_election_type = 'CONSTITUTION'),
-
-	parent_id int references constitution(id),
-	instituted_during tstzrange not null
-		check(not isempty(instituted_during) and not lower_inf(instituted_during)) -- default tstzrange(current_timestamp, null)
-);
-
--- TODO ignoring the case of a group of people or committee
--- inherently committees have to have consensus rules of their own, which are
-create type election_type as enum('PERSON', 'DOCUMENT', 'CONSTITUTION');
 create table election (
-	constitution_id int references constitution(id),
+	id uuid primary key,
 	"type" election_type not null,
+
+	defining_document_id uuid,
+	-- the single root election must be a document election
+	check (defining_document_id is not null or "type" = 'DOCUMENT'),
+
+	title text not null,
+	description text not null
+);
+-- only one root election allowed
+create unique index idx_root_election on election(defining_document_id) nulls not distinct where defining_document_id is null;
+
+-- documents are their own candidacy, unless we choose to put drafts in the same table?
+create table "document" (
+	id uuid primary key,
+	election_id uuid not null,
+	foreign key (election_id, 'DOCUMENT') references election(id, "type"),
+	enacted_during tstzmultirange not null,
+	-- stabilization_bucket numeric default 0 check (stabilization_bucket >= 0),
+
+	"text" text not null
+);
+
+alter table election add constraint foreign key (defining_document_id) references "document"(id);
+
+create table candidacy (
+	election_id uuid not null,
+	person_id uuid not null references person(id),
+	primary key (election_id, person_id),
+	foreign key (election_id, 'OFFICE') references election(id, "type"),
+	winner_during tstzmultirange not null,
+		-- check(not isempty(instituted_during) and not lower_inf(instituted_during)), -- default tstzrange(current_timestamp, null)
+	-- stabilization_bucket numeric default 0 check (stabilization_bucket >= 0),
+
+	argument_for text not null
 );
 
 
--- TODO constraint enforcing only one root constitution per time range
--- TODO constraint enforcing only open range is max
 
+create table allocation_update (
+	voter_id int references person(id) not null,
+	occurred_at timestamptz,
+		-- check (occurred_at < now()),
+	primary key (voter_id, occurred_at)
+);
 
+-- TODO do we want only one allocation table? perhaps even only one candidate table?
+-- check ((document_id is not null and "type" = 'DOCUMENT') or (candidacy_id is not null and "type" = 'OFFICE')),
+create table document_allocation (
+	voter_id uuid not null,
+	occurred_at timestamptz not null,
+	foreign key (voter_id, occurred_at) references allocation_update(voter_id, occurred_at),
+	document_id uuid not null references "document"(id),
+	primary key (voter_id, occurred_at, document_id),
 
--- create table person (
--- 	id serial primary key,
--- 	"name" text not null
--- );
+	-- in a quadratic range vote we need an allocation for the election rather than the candidate
+	candidacy_id references candidacy(id),
 
--- -- create table document (
--- -- 	id serial primary key,
--- -- 	"text" text not null
--- -- );
+	weight numeric not null check (weight != 0)
+);
 
--- -- this table tracks the tree of *currently in force* consitutions
--- -- a separate table is needed to track *candidate* constitutions
--- create table constitution (
--- 	id serial primary key,
--- 	"name" text not null,
--- 	created_at timestamptz not null,
--- );
+create table candidacy_allocation (
+	voter_id uuid not null,
+	occurred_at timestamptz not null,
+	foreign key (voter_id, occurred_at) references allocation_update(voter_id, occurred_at),
+	candidacy_id uuid not null references candidacy(id),
+	primary key (voter_id, occurred_at, candidacy_id),
 
--- create table election (
--- 	id serial primary key,
--- 	title text not null,
+	weight numeric not null check (weight != 0)
+);
 
--- );
-
--- create table candidacy (
--- 	election_id int references election(id) not null,
--- 	candidate_id int references person(id) not null,
--- 	stabilization_bucket numeric default 0 check (stabilization_bucket >= 0),
-
--- 	primary key (election_id, candidate_id),
+-- TODO constraint enforcing allocation_update to only insert occurred_at larger than existing
 
 -- 	-- this exclusion constraint is equivalent to partial unique index, except it's deferrable
 -- 	-- create unique index unique_winner on candidacy(election_id) where stabilization_bucket is null
@@ -86,31 +112,47 @@ create table election (
 -- 		exclude (election_id with =)
 -- 		where (stabilization_bucket is null)
 -- 		deferrable initially deferred
--- );
 
--- create table allocation_update (
--- 	voter_id int references person(id) not null,
--- 	occurred_at timestamptz primary key check (occurred_at < now())
--- );
-
--- create type allocation_type as enum('FOR', 'AGAINST');
--- create table allocation (
--- 	voter_id int references person(id) not null,
--- 	occurred_at timestamptz references allocation_update(occurred_at) not null,
--- 	election_id int not null,
--- 	candidate_id int not null,
-
--- 	weight int not null check (weight > 0),
--- 	"type" allocation_type not null default 'FOR',
-
--- 	-- every allocation must reference a valid candidacy
--- 	foreign key (election_id, candidate_id) references candidacy(election_id, candidate_id),
-
--- 	-- each voter can only allocate to each candidacy once at a time
--- 	primary key (voter_id, occurred_at, election_id, candidate_id)
--- );
+-- TODO constraint enforcing only open range is max
 
 -- create index index_allocation_voter_id on allocation(occurred_at);
+
+
+create table update_snapshot (
+	-- the upper bound is not inclusive, representing the precise moment the update happened
+	update_range tstzrange primary key,
+);
+
+create table update_snapshot_candidacy (
+	update_range tstzrange not null references update_snapshot(update_range),
+	candidacy_id uuid not null references candidacy(id),
+	primary key (update_range, candidacy_id),
+
+	stabilization_bucket numeric default 0 check (stabilization_bucket >= 0)
+);
+
+
+create procedure perform_vote_update()
+language sql as $$
+
+with
+(
+	select max(update_range.upper_bound) from update_snapshot as new_lower_bound
+)
+(
+	update update_snapshot set upper_bound = current_timestamp()
+	where upper_bound = max(update_range.upper_bound)
+)
+(
+	insert into update_snapshot (update_range) values (tstzrange(new_lower_bound, null)),
+)
+
+insert into update_snapshot_candidacy
+select from compute_next_snapshot
+$$;
+
+
+
 
 -- -- TODO make this concurrency safe https://www.cybertec-postgresql.com/en/triggers-to-enforce-constraints/
 -- create or replace function allocation_weight_valid() returns trigger as
