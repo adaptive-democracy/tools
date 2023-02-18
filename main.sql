@@ -142,39 +142,14 @@ create table candidacy_vote_update (
 
 
 
-create or replace function perform_vote_update()
--- returns table(voter_id uuid, occurred_at timestamptz, candidacy_id uuid, weight numeric)
-volatile
-language sql as $$
-
-	with
-	current_update as (
-		insert into vote_update () values ()
-		returning occurred_at
-	),
-
-	insert into candidacy_vote_update
-	select
-		current_update.occurred_at,
-		candidacy_id,
-		most_recent_update.stabilization_bucket + ,
-	from
-		current_update, most_recent_update
-	where occurred_at = most_recent_update.occurred_at
-
-$$;
-
-
-
 create view most_recent_update as
 select max(occurred_at) as occurred_at from vote_update;
 
-
--- TODO give this an argument of date to consider?
-create view global_most_recent_allocation as
-select voter_id, max(occurred_at) as occurred_at from allocation_update
-where occurred_at < most_recent_update.occurred_at
-group by voter_id;
+-- -- TODO give this an argument of date to consider?
+-- create view global_most_recent_allocation as
+-- select voter_id, max(occurred_at) as occurred_at from allocation_update
+-- where occurred_at < most_recent_update.occurred_at
+-- group by voter_id;
 
 -- for all these tables there's the "current" state (max(occurred_at) where occurred_at < most_recent_update.occurred_at)
 -- and the "next" state (max(occurred_at))
@@ -244,7 +219,7 @@ with
 election_maxes as (
 	select
 		election_id,
-		-- if all candidacys are negative or zero, then:
+		-- if all candidacies are negative or zero, then:
 		-- - if there isn't a current winner the new current winner must have non-negative votes
 		-- - if there is a current winner who is negative and someone is less negative then the less negative should fill
 		-- - if there is a current winner who is zero and everyone is negative or zero then no one should fill
@@ -257,7 +232,7 @@ election_maxes as (
 ),
 
 max_filled as (
-	select c.election_id, stabilization_bucket, count(candidacy_id) as num_candidacys
+	select c.election_id, stabilization_bucket, count(candidacy_id) as num_candidacies
 	from
 		candidacy_updated as c
 		join election_maxes as m on c.election_id = m.election_id and c.stabilization_bucket = m.max_bucket
@@ -265,7 +240,7 @@ max_filled as (
 ),
 
 max_votes as (
-	select c.election_id, total_vote, count(candidacy_id) as num_candidacys
+	select c.election_id, total_vote, count(candidacy_id) as num_candidacies
 	from
 		candidacy_updated as c
 		join election_maxes as m on c.election_id = m.election_id and c.total_vote = m.max_votes
@@ -273,19 +248,19 @@ max_votes as (
 )
 
 select
-	c.election_id, c.candidacy_id,
+	c.candidacy_id,
 	case
 		-- there's no current winner
 		when current_winner.total_vote is null then
 			case
 				-- this row uniquely has max non-negative votes
-				when max_votes.num_candidacys = 1 and max_votes.total_vote >= 0 and c.total_vote = max_votes.total_vote then null
+				when max_votes.num_candidacies = 1 and max_votes.total_vote >= 0 and c.total_vote = max_votes.total_vote then null
 				-- there's a tie, so we simply "do nothing", making no one the winner yet and keeping all the buckets at 0
 				else 0
 			end
 
 		-- there's a new unique winner
-		when max_filled.num_candidacys = 1 and max_filled.stabilization_bucket is not null then
+		when max_filled.num_candidacies = 1 and max_filled.stabilization_bucket is not null then
 			case
 				-- this row is the new winner
 				when c.stabilization_bucket = max_filled.stabilization_bucket then null
@@ -307,16 +282,62 @@ from
 
 create procedure perform_vote_update()
 language sql as $$
-update candidacy as c
-set stabilization_bucket = n.stabilization_bucket
-from next_candidacy_values as n
-where c.election_id = n.election_id and c.candidacy_id = n.candidacy_id
+
+	update candidacy as c
+	set stabilization_bucket = n.stabilization_bucket
+	from next_candidacy_values as n
+	where c.election_id = n.election_id and c.candidacy_id = n.candidacy_id
+
 $$;
 
 
 
+create or replace function perform_vote_update()
+-- returns table(voter_id uuid, occurred_at timestamptz, candidacy_id uuid, weight numeric)
+volatile
+language sql as $$
+
+	with
+	current_update as (
+		insert into vote_update () values ()
+		returning occurred_at
+	),
+
+	insert into candidacy_vote_update (occurred_at, candidacy_id, stabilization_bucket)
+	select
+		current_update.occurred_at,
+		candidacy_id,
+
+		case
+			-- there's no current winner
+			when current_winner.total_vote is null then
+				case
+					-- this row uniquely has max non-negative votes
+					when max_votes.num_candidacies = 1 and max_votes.total_vote >= 0 and c.total_vote = max_votes.total_vote then null
+					-- there's a tie, so we simply "do nothing", making no one the winner yet and keeping all the buckets at 0
+					else 0
+				end
+
+			-- there's a new unique winner
+			when max_filled.num_candidacies = 1 and max_filled.stabilization_bucket is not null then
+				case
+					-- this row is the new winner
+					when c.stabilization_bucket = max_filled.stabilization_bucket then null
+					-- this row is not the new winner
+					else 0
+				end
+
+			-- otherwise there's a tie for max filled bucket or no one has filled the bucket
+			else c.stabilization_bucket
+
+		end as stabilization_bucket
 
 
+	from
+		current_update, most_recent_update
+	where occurred_at = most_recent_update.occurred_at
+
+$$;
 
 
 
