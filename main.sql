@@ -15,6 +15,8 @@ create table person (
 
 create type election_kind as enum('DOCUMENT', 'OFFICE');
 
+-- what happens to elections when they're defining document isn't the current winner?
+
 create table election (
 	id uuid primary key default gen_random_uuid(),
 	kind election_kind not null,
@@ -30,6 +32,23 @@ create table election (
 );
 -- only one root election allowed
 create unique index idx_root_election on election(defining_document_id) nulls not distinct where defining_document_id is null;
+
+
+create view live_elections as
+select election.*
+from
+	candidacy
+	join current_candidacy_vote_update
+		on candidacy.id = current_candidacy_vote_update.candidacy_id
+		and current_candidacy_vote_update.stabilization_bucket is null
+	join election on candidacy.id = election.defining_document_id;
+
+create view live_candidacies as
+select candidacy.*
+from
+	live_elections
+	join candidacy on live_elections.id = candidacy.election_id;
+
 
 -- documents are their own candidacy, unless we choose to put drafts in the same table?
 create table candidacy (
@@ -338,7 +357,6 @@ language sql as $$
 	where occurred_at = most_recent_update.occurred_at
 
 $$;
-
 
 
 
