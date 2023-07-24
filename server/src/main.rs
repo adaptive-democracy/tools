@@ -1,5 +1,506 @@
-fn main() {
+use std::collections::HashMap;
+// use chrono::{DateTime as ChronoDateTime, Utc}
+
+// type DateTime = chrono::DateTime<chrono::Utc>;
+type DateTime = i64;
+
+
+
+
+#[derive(Debug)]
+enum ElectionKind {
+	Document,
+	Office,
+}
+
+#[derive(Debug)]
+enum SelectionMethod {
+	Resourced,
+	Quadratic,
+	ResourcedScore,
+	QuadraticScore,
+	ResourcedApproval,
+	QuadraticApproval,
+}
+
+
+trait CalculateWeight {
+	type Weight: Copy;
+
+	fn calculate_weight(&self) -> Self::Weight;
+}
+
+#[derive(Debug)]
+struct ResourceVote {
+	candicacy_id: usize,
+	weight: f64,
+}
+// impl CalculateWeight for ResourceVote {
+// 	type Weight = f64;
+
+// 	fn calculate_weight(&self) -> Self::Weight {
+// 		self.weight
+// 	}
+// }
+
+
+// #[derive(Debug)]
+// struct ApprovalVote {
+// 	candicacy_id: usize,
+// 	do_approve: bool,
+// }
+// impl CalculateWeight for ApprovalVote {
+// 	type Weight = usize;
+
+// 	fn calculate_weight(&self) -> Self::Weight {
+// 		if self.do_approve { 1 } else { 0 }
+// 	}
+// }
+
+
+// #[derive(Debug)]
+// struct ScoreVote {
+// 	candicacy_id: usize,
+// }
+
+
+
+
+#[derive(Debug)]
+struct PolityActionEntry {
+	occurred_at: DateTime,
+	change: PolityAction,
+}
+
+#[derive(Debug)]
+enum PolityAction {
+	EnterPerson{ id: usize },
+	SetAllocations{ voter_id: usize, allocations: Vec<Allocation> },
+	ExitPerson{ id: usize },
+
+	EnterCandidacy{ id: usize, owner_id: usize, election_id: usize, pitch: String, content: CandidacyContent },
+	ExitCandidacy{ id: usize },
+
+	Recalculate,
+}
+
+#[derive(Debug)]
+enum CandidacyContent {
+	Document{ body: String, sub_elections: Vec<ElectionDefinition> },
+	Office,
+}
+
+#[derive(Debug)]
+struct ElectionDefinition {
+	id: usize,
+	title: String,
+	description: String,
+	kind: ElectionKind,
+	selection_method: SelectionMethod,
+
+	negative_buckets: NegativeBucketsKind,
+	nomination_requirement_method: NominationRequirementMethod,
+	fill_requirement_method: FillRequirementMethod,
+	update_frequency: chrono::Duration,
+}
+
+#[derive(Debug)]
+enum NegativeBucketsKind {
+	None,
+	WithoutRemoval,
+	WithRemoval,
+}
+
+#[derive(Debug)]
+enum NominationRequirementMethod {
+	Constant(f64),
+	NoiseAdaptive,
+}
+
+#[derive(Debug)]
+enum FillRequirementMethod {
+	Constant(f64),
+	OnlyElectorateSize,
+	ElectorateSizeWithWideness,
+}
+
+
+
+#[derive(Debug)]
+struct PolityState {
+	person_table: HashSet<Person>,
+	election_table: HashSet<Election>,
+	candidacy_table: HashSet<Candidacy>,
+}
+
+// separating changes into a low level makes it possible to use any other persistence layer, as long as we can somehow serialize them to that layer
+impl PolityState {
+	// TODO remove errors from this stage? trust that's been achieved already by action calculation? assume these functions aren't intended as the real implementation, and that we can't assume any checks from any persistence layer?
+	fn apply_changes(&mut self, &mut errors: Vec<PolityActionError>, changes: Vec<PolityStateChange>) {
+		for change in changes {
+			self.apply_change(errors, change);
+		}
+	}
+
+	fn apply_change(&mut self, &mut errors: Vec<PolityActionError>, change: PolityStateChange) {
+		match expr {
+			InsertPerson{ person_id } => {
+				insert_or_conflict(errors, self.person_table, person_id, Person{ id: person_id, ... });
+			},
+			SetAllocations{ voter_id, allocations } => {
+				if let Some(person) = require_present(errors, self.person_table, voter_id) {
+					person.allocations = allocations;
+				}
+			},
+			RemovePerson{ person_id } => {
+				require_remove(errors, self.person_table, person_id);
+			},
+
+			InsertElection{ election } => {
+				insert_or_conflict(errors, self.election_table, election.id, election);
+			},
+			RemoveElection{ election_id } => {
+				require_remove(errors, self.election_table, election_id);
+			},
+
+			InsertCandidacy{ candidacy } => {
+				insert_or_conflict(errors, self.candidacy_table, candidacy.id, candidacy);
+			},
+			SetCandidacyStatus{ candidacy_id, status } => {
+				if let Some(candidacy) = require_present(errors, self.candidacy_table, voter_id) {
+					candidacy.status = status;
+				}
+			},
+			RemoveCandidacy{ candidacy_id } => {
+				require_remove(errors, self.candidacy_table, candidacy_id);
+			},
+		}
+	}
+}
+
+#[derive(Debug)]
+enum PolityStateChange {
+	InsertPerson{ person_id: usize },
+	SetAllocations{ voter_id: usize, allocations: Vec<Allocation> },
+	RemovePerson{ person_id: usize },
+
+	InsertElection{ election: Election },
+	RemoveElection{ election_id: usize },
+
+	InsertCandidacy{ candidacy: Candidacy },
+	SetCandidacyStatus{ candidacy_id: usize, status: CandidacyStatus },
+	RemoveCandidacy{ candidacy_id: usize },
+}
+
+#[derive(Debug)]
+struct Person {
+	id: usize,
+	name: String,
+	allocations: Vec<Allocation>,
+}
+
+#[derive(Debug)]
+struct Election {
+	id: usize,
+	title: String,
+	description: String,
+	nomination_fill_requirement: f64,
+	fill_requirement: f64,
+	kind: ElectionKind,
+	selection_method: SelectionMethod,
+	defining_document_id: Option<usize>,
+}
+
+#[derive(Debug)]
+struct Candidacy {
+	id: usize,
+	owner_id: usize,
+	election_id: usize,
+	content: CandidacyContent,
+	status: CandidacyStatus,
+}
+
+#[derive(Debug)]
+enum CandidacyStatus {
+	Nomination(f64),
+	Election(f64),
+	Winner,
+}
+
+
+fn calculate_polity_action(
+	state: &mut PolityState,
+	errors: &mut Vec<PolityActionError>,
+	changes: &mut Vec<PolityStateChange>,
+	action: PolityAction,
+) {
 	unimplemented!();
+
+	match action {
+		PolityAction::EnterPerson{ id } => {
+			let person = Person{ id, name: "".into() };
+			// TODO ensure no conflict on id
+			changes.push(PolityStateChange::InsertPerson{ person });
+		},
+		PolityAction::SetAllocations{ voter_id, allocations } => {
+			// TODO check person is valid
+			// TODO check allocations are valid
+			changes.push(PolityStateChange::SetAllocations{ voter_id, allocations });
+		},
+		PolityAction::ExitPerson{ id } => {
+			// TODO ensure exists
+			changes.push(PolityStateChange::RemovePerson{ id });
+		},
+
+		PolityAction::EnterCandidacy{ id, owner_id, election_id, content } => {
+			let election = require_present(errors, state.election_table, election_id);
+			// TODO demand content matches election.kind
+			require_present(errors, state.person_table, owner_id);
+
+			let status = match election.nomination_requirement_method {
+				NominationRequirementMethod::Constant(_) => { CandidacyStatus::Nomination(0.0) },
+				NominationRequirementMethod::None => { CandidacyStatus::Election(0.0) },
+			};
+			let candidacy = Candidacy{ id, owner_id, content, status };
+			// TODO ensure no conflict on id
+			changes.push(PolityStateChange::InsertCandidacy{ candicacy });
+		},
+		PolityAction::ExitCandidacy{ candicacy_id } => {
+			// TODO don't allow this exit if it's the winner and a Document type (people can resign, but a document needs to be replaced)
+			// TODO ensure candidacy exists
+			// no need to issue election deletions, this isn't allowed to be a document winner
+			changes.push(PolityStateChange::RemoveCandidacy{ candicacy_id });
+		},
+
+		PolityAction::Recalculate => {
+			// TODO group all the current candidacies by election_id
+			// TODO separate them by status
+			// calculate their new statii
+			// issue candidacy updates for all that changed
+			// issue election deletions for elections that are no longer live
+			find_current_winner
+			calculate_next_stabilization_buckets
+		},
+	}
+
+	Ok(())
+}
+
+fn calculate_candidacy_action(
+	state: &mut PolityState,
+	errors: &mut Vec<PolityActionError>,
+	changes: &mut Vec<PolityStateChange>,
+	candidacy_action: CandidacyAction,
+) {
+	unimplemented!();
+
+	let mut candidacy = require_present(state.candidacy_table, candidacy_action.candicacy_id)?;
+
+	match candidacy_action.change {
+		Nomination(nomination_bucket) => {
+			// TODO check the existing status is also Nomination
+			candidacy.status = CandidacyStatus::Nomination(nomination_bucket);
+		},
+		Election => {
+			candidacy.status = CandidacyStatus::Election(0.0);
+		},
+		Bucket(stabilization_bucket) => {
+			candidacy.status = CandidacyStatus::Election(stabilization_bucket);
+		},
+		Winner => {
+			candidacy.status = CandidacyStatus::Winner;
+			if let CandidacyContent::Document{ sub_elections } = candidacy.content {
+				for sub_election in sub_elections {
+					insert_or_conflict(state.election_table, sub_election.into())?;
+				}
+				// TODO find the current winner, delete all the elections and candidates down that tree
+				delete_elections(state, )?;
+			}
+		},
+		Removed => {
+			require_remove(state.candidacy_table, candidacy_action.candicacy_id)?;
+		},
+
+	}
+}
+
+// trait IdAble {
+// 	fn get_id(&self) -> usize;
+// }
+// impl IdAble for Person {
+// 	fn get_id(&self) -> usize {
+// 		self.id
+// 	}
+// }
+
+// impl<T: IdAble> PartialEq for T {
+// 	fn eq(&self, other: &Self) -> bool {
+// 		self.get_id() == other.get_id()
+// 	}
+// }
+// impl<T: IdAble> Eq for T {}
+// impl<T: IdAble> Hash for T {
+// 	fn hash<H: Hasher>(&self, state: &mut H) {
+// 		self.get_id().hash(state);
+// 	}
+// }
+
+
+
+fn aggregate_resource_votes(resource_votes: &Vec<ResourceVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
+
+	for resource_vote in resource_votes {
+		vote_aggregation
+			.entry(resource_vote.candicacy_id)
+			.and_modify(|t| *t += resource_vote.weight)
+			.or_insert(resource_vote.weight);
+	}
+
+	vote_aggregation
+}
+
+// fn find_aggregate_winner(vote_aggregation: &HashMap<usize, f64>) -> Option<usize> {
+// 	let mut maximum = 0;
+// 	let mut current_winners = Vec::new();
+
+// 	for (candicacy_id, total_vote) in vote_aggregation {
+// 		if *total_vote > maximum {
+// 			maximum = *total_vote;
+// 			current_winners.clear();
+// 			current_winners.push(candicacy_id);
+// 		}
+// 		else if *total_vote > 0 && *total_vote == maximum {
+// 			current_winners.push(candicacy_id);
+// 		}
+
+// 	}
+// 	// if there is a tie, no one wins
+// 	// if no one receives a strictly positive vote, no one wins
+// 	if current_winners.len() == 1 {
+// 		Some(*current_winners[0])
+// 	}
+// 	// TODO possibly consider returning some kind of error object containing all the tied winners
+// 	// else if current_winners.len() > 1 {
+// 	else {
+// 		None
+// 	}
+// }
+
+#[derive(Debug)]
+struct CandidacyEntry {
+	stabilization_bucket: f64,
+	total_vote: f64,
+}
+
+// fill requirements are best if calculated based on the size of the electorate exposed to an election, along with some for now undetermined "splitting" concept based on how many elections there are that this electorate is exposed to
+// the fill_requirement should be the amount where the election would change immediately if the entire electorate all voted for the same candidate
+// again, not sure if that means
+
+fn find_current_winner(candidacy_vec: &Vec<Candidacy>) -> Result<Option<&Candidacy>, (&Candidacy, &Candidacy)> {
+	let mut current_winner = None;
+	for candidacy in candidacy_vec {
+		match (current_winner, candidacy.stabilization_bucket) {
+			// this candidacy isn't the winner, do nothing
+			(_, Some(_)) => {},
+			// this candidacy is the winner and isn't conflicting with a previous find, set it
+			(None, None) => { current_winner = Some(candidacy); }
+			// inconsistency
+			(Some(a), Some(b)) => { return Err((a, b)); },
+		}
+	}
+
+	Ok(current_winner)
+}
+
+
+fn calculate_next_stabilization_buckets(
+	fill_requirement: f64,
+	current_winner: Option<(usize, f64)>,
+	candicacy_entries: &HashMap<usize, CandidacyEntry>,
+) -> HashMap<usize, Option<f64>> {
+	// if there isn't a current winner, then the mere highest candidate is the new winner?
+	// there might be a vulnerability there, where a highly approved current winner resigns, allowing a challenger with a fairly weak challenger to
+	// it might make sense to *always* require a bucket fill even in situations where there isn't a current winner
+
+	let (current_winner_id, current_winner_total_vote) = winner.unwrap_or_default((0, 0.0));
+	let current_winner_id = if current_winner_id == 0 { None } else { Some(current_winner_id) };
+	let mut candicacy_new_buckets = HashMap::new();
+
+	let mut positive_filled_maximum = 0.0;
+	let mut current_possible_winners = Vec::new();
+	for (candicacy_id, CandidacyEntry{stabilization_bucket, total_vote}) in candicacy_entries {
+		// TODO consider allowing buckets to *go negative* if total_vote is negative, and even possibly *removing* a candidate if they reach *negative* fill_requirement
+		let candidacy_new_bucket = std::cmp::max(
+			stabilization_bucket + (total_vote - current_winner_total_vote),
+			0,
+		);
+		candicacy_new_buckets.insert(candicacy_id, Some(candidacy_new_bucket));
+
+		// this is the version to always require a bucket fill
+		// the alternative would be to simply change fill_requirement to 0 if there isn't a current winner
+		// if this candidacy has reached the requirement then it has the chance to be the *unique* winner
+		if total_vote <= 0.0 || candidacy_new_bucket < fill_requirement {
+			continue;
+		}
+		if total_vote == positive_filled_maximum {
+			current_possible_winners.push(candicacy_id);
+		}
+		else if total_vote > positive_filled_maximum {
+			positive_filled_maximum = total_vote;
+			current_possible_winners.clear();
+			current_possible_winners.push(candicacy_id);
+		}
+	}
+
+	// there's a new unique winner
+	if current_possible_winners.len() == 1 {
+		let new_winner_id = *current_possible_winners[0];
+		candicacy_new_buckets.insert(new_winner_id, None)
+	}
+	// there's a tie or no one met the requirements
+	else {
+		// the current winner (if there is one) remains the current winner
+		if let Some(winner_id) = current_winner_id {
+			candicacy_new_buckets.insert(winner_id, None);
+		}
+	}
+
+	candicacy_new_buckets
+}
+
+
+
+fn main() {
+	let candidacy_vec = vec![
+		Candidacy{owner_id: 0, election_id: 0, stabilization_bucket: None},
+		Candidacy{owner_id: 1, election_id: 0, stabilization_bucket: Some(0.0)},
+		Candidacy{owner_id: 2, election_id: 0, stabilization_bucket: Some(0.0)},
+		Candidacy{owner_id: 3, election_id: 0, stabilization_bucket: Some(0.0)},
+	];
+
+	let resource_votes = vec![
+		ResourceVote{candicacy_id: 0, weight: 200},
+		ResourceVote{candicacy_id: 0, weight: 400},
+		ResourceVote{candicacy_id: 0, weight: -200},
+
+		ResourceVote{candicacy_id: 1, weight: 200},
+		ResourceVote{candicacy_id: 1, weight: 300},
+	];
+
+	let agg = aggregate_resource_votes(&resource_votes);
+	println!("{:?}", agg);
+	let winner = find_aggregate_winner(&agg);
+	println!("{:?}", winner);
+
+
+	let next_stabilization_buckets = calculate_next_stabilization_buckets(
+		10.0,
+		Some((0, )),
+		HashMap::from([
+			(0, CandidacyEntry{stabilization_bucket, total_vote}),
+		]);
+	)
 }
 
 

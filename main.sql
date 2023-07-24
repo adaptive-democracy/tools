@@ -15,7 +15,7 @@ create table person (
 
 create type election_kind as enum('DOCUMENT', 'OFFICE');
 
--- what happens to elections when they're defining document isn't the current winner?
+-- what happens to elections when their defining document isn't the current winner?
 
 create table election (
 	id uuid primary key default gen_random_uuid(),
@@ -66,8 +66,9 @@ create table allocation (
 	occurred_at timestamptz not null,
 	foreign key (voter_id, occurred_at) references allocation_update(voter_id, occurred_at),
 	candidacy_id uuid not null,
-	election_id uuid not null,
-	foreign key (candidacy_id, election_id) references candidacy(id, election_id),
+	-- election_id uuid not null,
+	-- foreign key (candidacy_id, election_id) references candidacy(id, election_id),
+	foreign key (candidacy_id) references candidacy(id),
 	unique (voter_id, occurred_at, candidacy_id),
 
 	weight numeric not null check (weight != 0)
