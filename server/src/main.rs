@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
+use core::hash::{Hash, Hasher};
+use core::borrow::Borrow;
 // use chrono::{DateTime as ChronoDateTime, Utc}
 
 // type DateTime = chrono::DateTime<chrono::Utc>;
 type DateTime = i64;
-
-
 
 
 #[derive(Debug)]
@@ -13,21 +13,20 @@ enum ElectionKind {
 	Office,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum SelectionMethod {
-	Resourced,
+	Resource,
 	Quadratic,
-	ResourcedScore,
+	ResourceScore,
 	QuadraticScore,
-	ResourcedApproval,
+	ResourceApproval,
 	QuadraticApproval,
 }
 
-
-trait CalculateWeight {
-	type Weight: Copy;
-
-	fn calculate_weight(&self) -> Self::Weight;
+trait Vote {
+	fn total_weight(&self) -> f64;
+	fn calculate_vote(&self) -> f64;
+	fn selection_method() -> SelectionMethod;
 }
 
 #[derive(Debug)]
@@ -35,34 +34,125 @@ struct ResourceVote {
 	candicacy_id: usize,
 	weight: f64,
 }
-// impl CalculateWeight for ResourceVote {
-// 	type Weight = f64;
+impl Vote for ResourceVote {
+	fn total_weight(&self) -> f64 { self.weight }
+	fn calculate_vote(&self) -> f64 { self.weight }
+	fn selection_method() -> SelectionMethod { SelectionMethod::Resource }
+}
+fn aggregate_election_resource_votes(votes: &Vec<ResourceVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
 
-// 	fn calculate_weight(&self) -> Self::Weight {
-// 		self.weight
-// 	}
-// }
+	for vote in votes {
+		vote_aggregation
+			.entry(vote.candicacy_id)
+			.and_modify(|t| *t += vote.weight)
+			.or_insert(vote.weight);
+	}
 
-
-// #[derive(Debug)]
-// struct ApprovalVote {
-// 	candicacy_id: usize,
-// 	do_approve: bool,
-// }
-// impl CalculateWeight for ApprovalVote {
-// 	type Weight = usize;
-
-// 	fn calculate_weight(&self) -> Self::Weight {
-// 		if self.do_approve { 1 } else { 0 }
-// 	}
-// }
+	vote_aggregation
+}
 
 
-// #[derive(Debug)]
-// struct ScoreVote {
-// 	candicacy_id: usize,
-// }
+#[derive(Debug)]
+struct QuadraticVote {
+	candicacy_id: usize,
+	weight: f64,
+}
+impl Vote for QuadraticVote {
+	fn total_weight(&self) -> f64 { self.weight }
+	fn calculate_vote(&self) -> f64 { quadratic_vote(self.weight) }
+	fn selection_method() -> SelectionMethod { SelectionMethod::Quadratic }
+}
+fn quadratic_vote(weight: f64) -> f64 {
+	self.weight.signum() * self.weight.abs().sqrt()
+}
+fn aggregate_election_quadratic_votes(votes: &Vec<QuadraticVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
 
+	for vote in votes {
+		let weight = quadratic_vote(vote.weight);
+		vote_aggregation
+			.entry(vote.candicacy_id)
+			.and_modify(|t| *t += weight)
+			.or_insert(weight);
+	}
+
+	vote_aggregation
+}
+
+
+#[derive(Debug)]
+struct ResourceScoreVote {
+	weight: f64,
+	scores: HashMap<usize, f64>,
+}
+// TODO an individual voter can't give more than one score to the same candidacy in a single allocation
+// TODO validate that all scores have the same sign, which should already be true by this point
+fn aggregate_election_resource_score_votes(votes: &Vec<ResourceScoreVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
+
+	for vote in votes {
+		for (candicacy_id, score) in vote.scores {
+			let candidate_score = vote.weight * score;
+			vote_aggregation
+				.entry(candicacy_id)
+				.and_modify(|t| *t += candidate_score)
+				.or_insert(candidate_score);
+		}
+	}
+
+	vote_aggregation
+}
+
+
+#[derive(Debug)]
+struct ResourceApprovalVote {
+	weight: f64,
+	approvals: HashMap<usize, bool>,
+}
+// TODO an individual voter can't give more than one score to the same candidacy in a single allocation
+fn aggregate_election_resource_approval_votes(votes: &Vec<ResourceApprovalVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
+
+	for vote in votes {
+		// TODO consider just doing both possible multiplications
+		for (candicacy_id, approval) in vote.approvals {
+			let approval = if approval { 1 } else { 0 };
+			let candidate_approval = vote.weight * approval;
+			vote_aggregation
+				.entry(candicacy_id)
+				.and_modify(|t| *t += approval)
+				.or_insert(approval);
+		}
+	}
+
+	vote_aggregation
+}
+
+
+#[derive(Debug)]
+struct QuadraticApprovalVote {
+	weight: f64,
+	approvals: HashMap<usize, bool>,
+}
+// TODO an individual voter can't give more than one score to the same candidacy in a single allocation
+fn aggregate_election_quadratic_approval_votes(votes: &Vec<QuadraticApprovalVote>) -> HashMap<usize, f64> {
+	let mut vote_aggregation = HashMap::new();
+
+	for vote in votes {
+		// TODO consider just doing both possible multiplications
+		for (candicacy_id, approval) in vote.approvals {
+			let approval = if approval { 1 } else { 0 };
+			let candidate_approval = quadratic_vote(vote.weight) * approval;
+			vote_aggregation
+				.entry(candicacy_id)
+				.and_modify(|t| *t += approval)
+				.or_insert(approval);
+		}
+	}
+
+	vote_aggregation
+}
 
 
 
@@ -82,6 +172,13 @@ enum PolityAction {
 	ExitCandidacy{ id: usize },
 
 	Recalculate,
+}
+
+#[derive(Debug)]
+struct Allocation {
+	candidacy_id: usize,
+	weight: f64,
+	vote
 }
 
 #[derive(Debug)]
@@ -133,16 +230,15 @@ struct PolityState {
 	candidacy_table: HashSet<Candidacy>,
 }
 
-// separating changes into a low level makes it possible to use any other persistence layer, as long as we can somehow serialize them to that layer
+// separating changes into a low level makes it possible to use any other persistence layer, as long as we can somehow serialize to that layer
 impl PolityState {
-	// TODO remove errors from this stage? trust that's been achieved already by action calculation? assume these functions aren't intended as the real implementation, and that we can't assume any checks from any persistence layer?
-	fn apply_changes(&mut self, &mut errors: Vec<PolityActionError>, changes: Vec<PolityStateChange>) {
-		for change in changes {
-			self.apply_change(errors, change);
+	fn apply_changes(&mut self, changes: Vec<PolityStateChange>) {
+		for change in changes.into_iter() {
+			self.apply_change(change);
 		}
 	}
 
-	fn apply_change(&mut self, &mut errors: Vec<PolityActionError>, change: PolityStateChange) {
+	fn apply_change(&mut self, change: PolityStateChange) {
 		match expr {
 			InsertPerson{ person_id } => {
 				insert_or_conflict(errors, self.person_table, person_id, Person{ id: person_id, ... });
@@ -192,12 +288,55 @@ enum PolityStateChange {
 	RemoveCandidacy{ candidacy_id: usize },
 }
 
+
+// trait IdAble {
+// 	fn get_id(&self) -> usize;
+// }
+
+#[derive(Debug)]
+enum TableKind {
+	Person,
+	Election,
+	Candidacy,
+}
+
+trait TableKindAble { fn table_kind() -> TableKind; }
+
+macro_rules! impl_id_traits {
+	($structname: ident) => {
+		// impl IdAble for $structname { fn get_id(&self) -> usize { self.id } }
+
+		impl PartialEq for $structname {
+			fn eq(&self, other: &Self) -> bool {
+				self.id == other.id
+			}
+		}
+		impl Eq for $structname {}
+		impl Hash for $structname {
+			fn hash<H: Hasher>(&self, state: &mut H) {
+				self.id.hash(state);
+			}
+		}
+		impl Borrow<usize> for $structname {
+			fn borrow(&self) -> &usize {
+				&self.id
+			}
+		}
+		impl TableKindAble for $structname {
+			fn table_kind() -> TableKind { TableKind::$structname }
+		}
+	};
+}
+
+
+
 #[derive(Debug)]
 struct Person {
 	id: usize,
 	name: String,
 	allocations: Vec<Allocation>,
 }
+impl_id_traits!(Person);
 
 #[derive(Debug)]
 struct Election {
@@ -210,6 +349,7 @@ struct Election {
 	selection_method: SelectionMethod,
 	defining_document_id: Option<usize>,
 }
+impl_id_traits!(Election);
 
 #[derive(Debug)]
 struct Candidacy {
@@ -219,6 +359,8 @@ struct Candidacy {
 	content: CandidacyContent,
 	status: CandidacyStatus,
 }
+impl_id_traits!(Candidacy);
+
 
 #[derive(Debug)]
 enum CandidacyStatus {
@@ -228,23 +370,80 @@ enum CandidacyStatus {
 }
 
 
+#[derive(Debug)]
+enum PolityActionError {
+	IdConflict{ id: usize, table_kind: TableKind },
+	NotFound{ id: usize, table_kind: TableKind },
+	OverAllowedWeight{ id: usize, found_weight: f64, allowed_weight: f64 },
+}
+
+
+fn require_not_present<T: Borrow<usize> + TableKindAble>(errors: &mut Vec<PolityActionError>, table: &HashSet<T>, id: &usize) -> Option<()> {
+	if table.contains(id) {
+		let table_kind = T::table_kind();
+		errors.push(PolityActionError::IdConflict{ id: *id, table_kind });
+		return None;
+	}
+	Some(())
+}
+fn require_present<T: Borrow<usize> + TableKindAble>(errors: &mut Vec<PolityActionError>, table: &HashSet<T>, id: &usize) -> Option<&T> {
+	match table.get(id) {
+		None => {
+			let table_kind = T::table_kind();
+			errors.push(PolityActionError::NotFound{ id: *id, table_kind });
+			None
+		},
+		item => item,
+	}
+}
+
+fn validate_allocations(errors: &mut Vec<PolityActionError>, allocations: &Vec<Allocation>, person: &Person) -> Option<()> {
+	let mut have_errors = false;
+	let mut found_weight = 0.0;
+	for allocation in allocations {
+		found_weight += allocation.total_weight();
+		match require_present(errors, state.candidacy_table, allocation.candidacy_id) {
+			None => { have_errors = true; },
+			Some(candidacy) => {
+				// TODO have to get the election selection_method and ensure this allocation fits it
+				validate_method_matches_allocation()
+				election.selection_method
+
+				// this is probably overkill
+				// the candidacy existing in this table should imply it's valid
+				// match require_present(errors, state.election_table, candidacy.election_id) {
+				// 	Some(election) => {
+				// 		require_kinds_match(errors, candidacy.content, election.kind);
+				// 	},
+				// 	None => { have_errors = true; },
+				// }
+			},
+		}
+	}
+
+	let allowed_weight = person.allowed_weight;
+	if found_weight > allowed_weight {
+		errors.push(PolityActionError::OverAllowedWeight{ id: person.id, found_weight, allowed_weight });
+		have_errors = true;
+	}
+
+	if have_errors { None } else { Some(()) }
+}
+
 fn calculate_polity_action(
 	state: &mut PolityState,
 	errors: &mut Vec<PolityActionError>,
 	changes: &mut Vec<PolityStateChange>,
 	action: PolityAction,
-) {
-	unimplemented!();
-
+) -> Option<()> {
 	match action {
 		PolityAction::EnterPerson{ id } => {
-			let person = Person{ id, name: "".into() };
-			// TODO ensure no conflict on id
+			require_not_present(errors, state.person_table, &id)?;
 			changes.push(PolityStateChange::InsertPerson{ person });
 		},
 		PolityAction::SetAllocations{ voter_id, allocations } => {
-			// TODO check person is valid
-			// TODO check allocations are valid
+			let person = require_present(errors, state.person_table, &voter_id)?;
+			validate_allocations(errors, &allocations, person)?;
 			changes.push(PolityStateChange::SetAllocations{ voter_id, allocations });
 		},
 		PolityAction::ExitPerson{ id } => {
@@ -253,7 +452,7 @@ fn calculate_polity_action(
 		},
 
 		PolityAction::EnterCandidacy{ id, owner_id, election_id, content } => {
-			let election = require_present(errors, state.election_table, election_id);
+			let election = require_present(errors, state.election_table, election_id)?;
 			// TODO demand content matches election.kind
 			require_present(errors, state.person_table, owner_id);
 
@@ -324,41 +523,7 @@ fn calculate_candidacy_action(
 	}
 }
 
-// trait IdAble {
-// 	fn get_id(&self) -> usize;
-// }
-// impl IdAble for Person {
-// 	fn get_id(&self) -> usize {
-// 		self.id
-// 	}
-// }
 
-// impl<T: IdAble> PartialEq for T {
-// 	fn eq(&self, other: &Self) -> bool {
-// 		self.get_id() == other.get_id()
-// 	}
-// }
-// impl<T: IdAble> Eq for T {}
-// impl<T: IdAble> Hash for T {
-// 	fn hash<H: Hasher>(&self, state: &mut H) {
-// 		self.get_id().hash(state);
-// 	}
-// }
-
-
-
-fn aggregate_resource_votes(resource_votes: &Vec<ResourceVote>) -> HashMap<usize, f64> {
-	let mut vote_aggregation = HashMap::new();
-
-	for resource_vote in resource_votes {
-		vote_aggregation
-			.entry(resource_vote.candicacy_id)
-			.and_modify(|t| *t += resource_vote.weight)
-			.or_insert(resource_vote.weight);
-	}
-
-	vote_aggregation
-}
 
 // fn find_aggregate_winner(vote_aggregation: &HashMap<usize, f64>) -> Option<usize> {
 // 	let mut maximum = 0;
@@ -419,9 +584,6 @@ fn calculate_next_stabilization_buckets(
 	current_winner: Option<(usize, f64)>,
 	candicacy_entries: &HashMap<usize, CandidacyEntry>,
 ) -> HashMap<usize, Option<f64>> {
-	// if there isn't a current winner, then the mere highest candidate is the new winner?
-	// there might be a vulnerability there, where a highly approved current winner resigns, allowing a challenger with a fairly weak challenger to
-	// it might make sense to *always* require a bucket fill even in situations where there isn't a current winner
 
 	let (current_winner_id, current_winner_total_vote) = winner.unwrap_or_default((0, 0.0));
 	let current_winner_id = if current_winner_id == 0 { None } else { Some(current_winner_id) };
@@ -437,12 +599,14 @@ fn calculate_next_stabilization_buckets(
 		);
 		candicacy_new_buckets.insert(candicacy_id, Some(candidacy_new_bucket));
 
-		// this is the version to always require a bucket fill
+		// it isn't sound to declare the mere highest candidate the new winner when there isn't a current winner
+		// doing so would be vulnerable, where a highly approved current winner resigns, allowing a weak challenger to immediately take the stabilized spot
+		// it makes sense to *always* require a bucket fill even in situations where there isn't a current winner
 		// the alternative would be to simply change fill_requirement to 0 if there isn't a current winner
+
 		// if this candidacy has reached the requirement then it has the chance to be the *unique* winner
-		if total_vote <= 0.0 || candidacy_new_bucket < fill_requirement {
-			continue;
-		}
+		if total_vote <= 0.0 || candidacy_new_bucket < fill_requirement { continue; }
+
 		if total_vote == positive_filled_maximum {
 			current_possible_winners.push(candicacy_id);
 		}
