@@ -213,12 +213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indextree"
-version = "4.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497f036ac2fae75c34224648a77802e5dd4e9cfb56f4713ab6b12b7160a0523b"
-
-[[package]]
 name = "itoa"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,9 +291,6 @@ dependencies = [
 [[package]]
 name = "persistent_democracy_core"
 version = "0.1.0"
-dependencies = [
- "indextree",
-]
 
 [[package]]
 name = "persistent_democracy_server"
