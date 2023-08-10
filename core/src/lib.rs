@@ -15,11 +15,14 @@ struct PolityActionEntry {
 #[derive(Debug)]
 enum PolityAction {
 	EnterPerson{ person_id: usize, allowed_weight: f64 },
-	SetAllocations{ voter_id: usize, allocations: Vec<Allocation> },
+	SetResourceAllocations{ voter_id: usize, allocations: Vec<ResourceAllocation> },
+	SetResourceScoreAllocations{ voter_id: usize, allocations: Vec<ResourceScoreAllocation> },
 	ExitPerson{ person_id: usize },
 
-	EnterCandidacy{ candidacy_id: usize, owner_id: usize, election_id: usize, pitch: String, content: CandidacyContent },
-	ExitCandidacy{ candidacy_id: usize },
+	EnterOfficeCandidacy{ candidacy_id: usize, owner_id: usize, election_id: usize, pitch: String },
+	ExitOfficeCandidacy{ candidacy_id: usize },
+	EnterDocumentCandidacy{ candidacy_id: usize, owner_id: usize, election_id: usize, pitch: String, content: CandidacyContent },
+	ExitDocumentCandidacy{ candidacy_id: usize },
 
 	Recalculate,
 }
@@ -50,7 +53,14 @@ enum SelectionMethod {
 }
 
 #[derive(Debug)]
-enum VoterAllocation {
+struct InputAllocation {
+	voter_id: usize,
+	election_id: usize,
+	allocation: EitherAllocation,
+}
+
+#[derive(Debug)]
+enum EitherAllocation {
 	Resource(ResourceAllocation),
 	ResourceScore(ResourceScoreAllocation),
 }
@@ -289,7 +299,7 @@ fn perform_polity_recalculation(
 			SelectionMethod::Resource{ scale_quadratically } => {
 				let allocations = allocations.iter()
 					// TODO issue a warning if there are mismatched allocations
-					.filter_map(|a| match &a.allocation { VoterAllocation::Resource(a) => Some(a), _ => None })
+					.filter_map(|a| match &a.allocation { EitherAllocation::Resource(a) => Some(a), _ => None })
 					.collect();
 				if !scale_quadratically { aggregate_resource_votes(allocations) }
 				else { aggregate_quadratic_resource_votes(allocations) }
@@ -297,7 +307,7 @@ fn perform_polity_recalculation(
 			SelectionMethod::ResourceScore{ scale_quadratically } => {
 				let allocations = allocations.iter()
 					// TODO issue a warning if there are mismatched allocations
-					.filter_map(|a| match &a.allocation { VoterAllocation::ResourceScore(a) => Some(a), _ => None })
+					.filter_map(|a| match &a.allocation { EitherAllocation::ResourceScore(a) => Some(a), _ => None })
 					.collect();
 				if !scale_quadratically { aggregate_resource_score_votes(allocations) }
 				else { aggregate_quadratic_resource_score_votes(allocations) }
@@ -462,16 +472,11 @@ fn validate_allocations(
 		return None;
 	}
 
-	let mut valid_allocations = Vec::new();
-	for allocation in allocations.into_iter() {
-		// no need to reject all the allocations if some of them have problems
-		// those will be reported as errors, and we'll just drop them on the floor here
-		if let Some(mut valid_allocation) = validate_allocation(errors, state, allocation) {
-			// just force all allocations to match the right voter
-			valid_allocation.key.voter_id = person.id;
-			valid_allocations.push(valid_allocation);
-		}
-	}
+	let valid_allocations = allocations.into_iter()
+		.filter_map(|allocation| validate_allocation(errors, state, allocation))
+		.map(|mut a| { a.key.voter_id = person.id; a })
+		.collect();
+
 	Some(valid_allocations)
 }
 
@@ -611,16 +616,16 @@ macro_rules! impl_id_traits {
 
 
 #[derive(Debug)]
-struct Person {
+struct StoragePerson {
 	id: usize,
 	allowed_weight: f64,
 	// name: String,
 }
-impl IdAble for Person { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
-impl_id_traits!(Person);
+impl IdAble for StoragePerson { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
+impl_id_traits!(StoragePerson);
 
 #[derive(Debug)]
-struct Election {
+struct StorageElection {
 	id: usize,
 	title: String,
 	description: String,
@@ -629,11 +634,11 @@ struct Election {
 	selection_method: SelectionMethod,
 	defining_document_id: Option<usize>,
 }
-impl IdAble for Election { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
-impl_id_traits!(Election);
+impl IdAble for StorageElection { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
+impl_id_traits!(StorageElection);
 
 #[derive(Debug)]
-struct Candidacy {
+struct StorageCandidacy {
 	id: usize,
 	owner_id: usize,
 	election_id: usize,
@@ -641,44 +646,54 @@ struct Candidacy {
 	content: CandidacyContent,
 	status: CandidacyStatus,
 }
-impl IdAble for Candidacy { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
-impl_id_traits!(Candidacy);
+impl IdAble for StorageCandidacy { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
+impl_id_traits!(StorageCandidacy);
 
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-struct AllocationId {
-	voter_id: usize,
-	election_id: usize,
-}
+// #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+// struct AllocationId {
+// 	voter_id: usize,
+// 	election_id: usize,
+// }
+
 #[derive(Debug)]
-struct Allocation {
-	key: AllocationId,
-	allocation: VoterAllocation,
+struct StorageResourceAllocation {
+	election_id: usize,
+	allocation: ResourceAllocation,
 }
+
+#[derive(Debug)]
+struct StorageResourceScoreAllocation {
+	election_id: usize,
+	allocation: ResourceScoreAllocation,
+}
+
+
+
 impl IdAble for Allocation { type Id = AllocationId; fn get_id(&self) -> &Self::Id { &self.key } }
 impl_id_traits!(Allocation);
 
 impl Allocation {
 	fn total_weight(&self) -> f64 {
 		match &self.allocation {
-			VoterAllocation::Resource(a) => { a.weight },
-			VoterAllocation::ResourceScore(a) => { a.approve_weight + a.disapprove_weight },
+			EitherAllocation::Resource(a) => { a.weight },
+			EitherAllocation::ResourceScore(a) => { a.approve_weight + a.disapprove_weight },
 		}
 	}
 
 	fn compatible_with_method(&self, method: &SelectionMethod) -> bool {
 		match (&self.allocation, method) {
-			(VoterAllocation::Resource(_), SelectionMethod::Resource{..}) => { true },
-			(VoterAllocation::ResourceScore(_), SelectionMethod::ResourceScore{..}) => { true },
+			(EitherAllocation::Resource(_), SelectionMethod::Resource{..}) => { true },
+			(EitherAllocation::ResourceScore(_), SelectionMethod::ResourceScore{..}) => { true },
 			_ => false,
 		}
 	}
 
 	fn iter_candidacies(&self) -> Vec<&usize> {
 		match &self.allocation {
-			VoterAllocation::Resource(a) => {
+			EitherAllocation::Resource(a) => {
 				vec![&a.candidacy_id]
 			},
-			VoterAllocation::ResourceScore(a) => {
+			EitherAllocation::ResourceScore(a) => {
 				a.scores.keys().collect()
 			},
 		}
@@ -688,10 +703,11 @@ impl Allocation {
 
 #[derive(Debug)]
 struct PolityState {
-	person_table: HashSet<Person>,
-	election_table: HashSet<Election>,
-	candidacy_table: HashSet<Candidacy>,
-	allocation_table: HashMap<usize, Vec<Allocation>>,
+	person_table: HashSet<StoragePerson>,
+	election_table: HashSet<StorageElection>,
+	candidacy_table: HashSet<StorageCandidacy>,
+	resource_allocation_table: HashMap<usize, Vec<StorageResourceAllocation>>,
+	resource_score_allocation_table: HashMap<usize, Vec<StorageResourceScoreAllocation>>,
 }
 
 #[derive(Debug)]
