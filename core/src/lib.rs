@@ -33,6 +33,7 @@ enum PolityActionError {
 	NotFound{ id: usize, table_kind: TableKind },
 	NoCandidacy{ candidacy_id: usize, voter_id: usize },
 	NoElection{ election_id: usize, voter_id: usize },
+	NotRequiredEqualWeight{ person_id: usize, found_weight: f64, required_equal_weight: f64 },
 	AboveAllowedWeight{ voter_id: usize, found_weight: f64, allowed_weight: f64 },
 	MismatchedKind{ candidacy_id: usize, expected_kind: ElectionKind },
 	MismatchedMethod{ key: AllocationId, expected_method: SelectionMethod },
@@ -102,7 +103,6 @@ struct ResourceScoreAllocation {
 	scores: HashMap<usize, f64>,
 }
 
-
 fn aggregate_resource_score_votes(allocations: Vec<&ResourceScoreAllocation>) -> HashMap<usize, f64> {
 	let mut vote_aggregation = HashMap::new();
 	for allocation in allocations {
@@ -141,7 +141,7 @@ fn quadratic_vote(weight: f64) -> f64 {
 
 
 #[derive(Debug)]
-struct ElectionDefinition {
+struct InputElection {
 	id: usize,
 	title: String,
 	description: String,
@@ -154,7 +154,7 @@ struct ElectionDefinition {
 	// update_frequency: chrono::Duration,
 }
 
-impl ElectionDefinition {
+impl InputElection {
 	fn make_election(&self, defining_document_id: usize) -> Election {
 		Election {
 			id: self.id,
@@ -202,7 +202,7 @@ enum CandidacyStatus {
 
 #[derive(Debug)]
 enum CandidacyContent {
-	Document{ body: String, sub_elections: Vec<ElectionDefinition> },
+	Document{ body: String, sub_elections: Vec<InputElection> },
 	Office,
 }
 
@@ -214,7 +214,12 @@ fn calculate_polity_action(
 ) -> Option<()> {
 	match action {
 		PolityAction::EnterPerson{ person_id, allowed_weight } => {
-			// TODO check against polity settings to see if everyone must have some specific allowed weight
+			if let Some(required_equal_weight) = state.required_equal_weight {
+				if allowed_weight != required_equal_weight {
+					errors.push(PolityActionError::NotRequiredEqualWeight{ person_id, found_weight: allowed_weight, required_equal_weight });
+					return None;
+				}
+			}
 			require_not_present(errors, &state.person_table, &person_id)?;
 			changes.push(PolityStateChange::InsertPerson{ person_id, allowed_weight });
 		},
@@ -284,93 +289,100 @@ fn perform_polity_recalculation(
 	let allocations_by_election_id = allocations_by_election_id;
 
 	for (election_id, candidacies) in grouped_candidacies {
-		// simply ignore (or mark) allocations that point to candidacies that no longer exist, since that's probably not the fault of the voter
-		// we just need to notify them to switch their weights, which they can do whenever they want
-		let election = match require_present(errors, &state.election_table, &election_id) {
-			Some(election) => election,
-			None => { continue; },
-		};
-		let allocations = match allocations_by_election_id.get(&election_id) {
-			Some(allocations) => allocations,
-			None => { continue; },
-		};
+		perform_election_recalculation(state, errors, changes, election_id, candidacies);
+	}
 
-		let aggregation = match election.selection_method {
-			SelectionMethod::Resource{ scale_quadratically } => {
-				let allocations = allocations.iter()
-					// TODO issue a warning if there are mismatched allocations
-					.filter_map(|a| match &a.allocation { EitherAllocation::Resource(a) => Some(a), _ => None })
-					.collect();
-				if !scale_quadratically { aggregate_resource_votes(allocations) }
-				else { aggregate_quadratic_resource_votes(allocations) }
+	Some(())
+}
+
+fn perform_election_recalculation(
+	state: &mut PolityState,
+	errors: &mut Vec<PolityActionError>,
+	changes: &mut Vec<PolityStateChange>,
+	allocations_by_election_id: &HashMap<usize, &Allocation>,
+	election_id: usize,
+	candidacies: &HashMap<usize, &Candidacy>,
+) -> Option<()> {
+	// simply ignore (or mark) allocations that point to candidacies that no longer exist, since that's probably not the fault of the voter
+	// we just need to notify them to switch their weights, which they can do whenever they want
+	let election = match require_present(errors, &state.election_table, &election_id)?;
+	let allocations = match allocations_by_election_id.get(&election_id)?;
+
+	let aggregation = match election.selection_method {
+		SelectionMethod::Resource{ scale_quadratically } => {
+			let allocations = allocations.iter()
+				// TODO issue a warning if there are mismatched allocations
+				.filter_map(|a| match &a.allocation { EitherAllocation::Resource(a) => Some(a), _ => None })
+				.collect();
+			if !scale_quadratically { aggregate_resource_votes(allocations) }
+			else { aggregate_quadratic_resource_votes(allocations) }
+		},
+		SelectionMethod::ResourceScore{ scale_quadratically } => {
+			let allocations = allocations.iter()
+				// TODO issue a warning if there are mismatched allocations
+				.filter_map(|a| match &a.allocation { EitherAllocation::ResourceScore(a) => Some(a), _ => None })
+				.collect();
+			if !scale_quadratically { aggregate_resource_score_votes(allocations) }
+			else { aggregate_quadratic_resource_score_votes(allocations) }
+		},
+	};
+
+	let mut winner_entries = Vec::new();
+	let mut candidacy_entries = Vec::new();
+	for candidacy in &candidacies {
+		let total_vote = *aggregation.get(&candidacy.id).unwrap_or(&0.0);
+		match candidacy.status {
+			CandidacyStatus::Nomination(bucket) => {
+				candidacy_entries.push(CandidacyEntry{ candidacy_id: candidacy.id, is_nomination: true, bucket, total_vote });
 			},
-			SelectionMethod::ResourceScore{ scale_quadratically } => {
-				let allocations = allocations.iter()
-					// TODO issue a warning if there are mismatched allocations
-					.filter_map(|a| match &a.allocation { EitherAllocation::ResourceScore(a) => Some(a), _ => None })
-					.collect();
-				if !scale_quadratically { aggregate_resource_score_votes(allocations) }
-				else { aggregate_quadratic_resource_score_votes(allocations) }
+			CandidacyStatus::Election(bucket) => {
+				candidacy_entries.push(CandidacyEntry{ candidacy_id: candidacy.id, is_nomination: false, bucket, total_vote });
 			},
-		};
-
-		let mut winner_entries = Vec::new();
-		let mut candidacy_entries = Vec::new();
-		for candidacy in &candidacies {
-			let total_vote = *aggregation.get(&candidacy.id).unwrap_or(&0.0);
-			match candidacy.status {
-				CandidacyStatus::Nomination(bucket) => {
-					candidacy_entries.push(CandidacyEntry{ candidacy_id: candidacy.id, is_nomination: true, bucket, total_vote });
-				},
-				CandidacyStatus::Election(bucket) => {
-					candidacy_entries.push(CandidacyEntry{ candidacy_id: candidacy.id, is_nomination: false, bucket, total_vote });
-				},
-				CandidacyStatus::Winner => {
-					winner_entries.push((candidacy.id, total_vote));
-				},
-			}
+			CandidacyStatus::Winner => {
+				winner_entries.push((candidacy.id, total_vote));
+			},
 		}
+	}
 
-		// TODO actually calculate these
-		let nomination_fill_requirement = 0.0;
-		let election_fill_requirement = 0.0;
+	// TODO actually calculate these
+	let nomination_fill_requirement = 0.0;
+	let election_fill_requirement = 0.0;
 
-		// TODO issue a warning if there's more than one winner
-		let current_winner = if winner_entries.len() == 1 { Some(winner_entries[0]) } else { None };
-		let (new_winner, candidacy_new_statuses) =
-			calculate_next_statuses(nomination_fill_requirement, election_fill_requirement, current_winner, candidacy_entries);
+	// TODO issue a warning if there's more than one winner
+	let current_winner = if winner_entries.len() == 1 { Some(winner_entries[0]) } else { None };
+	let (new_winner, candidacy_new_statuses) =
+		calculate_next_statuses(nomination_fill_requirement, election_fill_requirement, current_winner, candidacy_entries);
 
-		// issue candidacy updates for all that changed
-		for (candidacy_id, status) in candidacy_new_statuses {
-			changes.push(PolityStateChange::SetCandidacyStatus{ candidacy_id, status });
-		}
+	// issue candidacy updates for all that changed
+	for (candidacy_id, status) in candidacy_new_statuses {
+		changes.push(PolityStateChange::SetCandidacyStatus{ candidacy_id, status });
+	}
 
-		if let ElectionKind::Document = election.kind {
-			// create sub elections defined by candidacy
-			if let Some(new_winner_id) = new_winner {
-				if let Some(new_winner_document) = candidacies.get(&new_winner_id) {
-					if let CandidacyContent::Document{ sub_elections, .. } = &new_winner_document.content {
-						for sub_election in sub_elections {
-							changes.push(PolityStateChange::InsertElection{ election: sub_election.make_election(new_winner_document.id) });
-						}
+	if let ElectionKind::Document = election.kind {
+		// create sub elections defined by candidacy
+		if let Some(new_winner_id) = new_winner {
+			if let Some(new_winner_document) = candidacies.get(&new_winner_id) {
+				if let CandidacyContent::Document{ sub_elections, .. } = &new_winner_document.content {
+					for sub_election in sub_elections {
+						changes.push(PolityStateChange::InsertElection{ election: sub_election.make_election(new_winner_document.id) });
 					}
 				}
 			}
+		}
 
-			// issue election and candidacy deletions for those no longer live
-			if let Some((old_winner_id, _)) = current_winner {
-				delete_under_document(state, changes, old_winner_id);
+		// issue election and candidacy deletions for those no longer live
+		if let Some((old_winner_id, _)) = current_winner {
+			delete_under_document(state, changes, old_winner_id);
 
-				fn delete_under_document(state: &PolityState, changes: &mut Vec<PolityStateChange>, exiting_candidacy_id: usize) {
-					changes.push(PolityStateChange::RemoveCandidacy{ candidacy_id: exiting_candidacy_id });
+			fn delete_under_document(state: &PolityState, changes: &mut Vec<PolityStateChange>, exiting_candidacy_id: usize) {
+				changes.push(PolityStateChange::RemoveCandidacy{ candidacy_id: exiting_candidacy_id });
 
-					for election in state.election_table.iter().filter(|e| e.defining_document_id == Some(exiting_candidacy_id)) {
-						let election_id = election.id;
-						changes.push(PolityStateChange::RemoveElection{ election_id });
+				for election in state.election_table.iter().filter(|e| e.defining_document_id == Some(exiting_candidacy_id)) {
+					let election_id = election.id;
+					changes.push(PolityStateChange::RemoveElection{ election_id });
 
-						for child_candidacy in state.candidacy_table.iter().filter(|c| c.election_id == election_id) {
-							delete_under_document(state, changes, child_candidacy.id);
-						}
+					for child_candidacy in state.candidacy_table.iter().filter(|c| c.election_id == election_id) {
+						delete_under_document(state, changes, child_candidacy.id);
 					}
 				}
 			}
@@ -703,6 +715,7 @@ impl Allocation {
 
 #[derive(Debug)]
 struct PolityState {
+	required_equal_weight: Option<f64>,
 	person_table: HashSet<StoragePerson>,
 	election_table: HashSet<StorageElection>,
 	candidacy_table: HashSet<StorageCandidacy>,
@@ -770,11 +783,11 @@ impl PolityState {
 }
 
 
+#[cfg(test)]
+mod tests {
 
-// #[cfg(test)]
-// mod tests {
-
-// 	#[test]
-// 	fn test__empty() {
-// 	}
-// }
+	#[test]
+	fn test__empty() {
+		//
+	}
+}
