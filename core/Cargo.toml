@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 # indextree = "4.5"
+
+[dev-dependencies]
+proptest = "1"
