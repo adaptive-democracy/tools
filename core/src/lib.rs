@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 use core::hash::{Hash, Hasher};
 use core::borrow::Borrow;
 // use chrono::{DateTime as ChronoDateTime, Utc}
+use rust_decimal::prelude::*;
 
 // type DateTime = chrono::DateTime<chrono::Utc>;
 type DateTime = i64;
+type Weight = Decimal;
 
 #[derive(Debug)]
 struct PolityActionEntry {
@@ -12,7 +14,7 @@ struct PolityActionEntry {
 	change: PolityAction,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CandidacyContent {
 	Office{ pitch: String },
 	Document{ pitch: String, body: String, sub_elections: Vec<InputElection> },
@@ -20,7 +22,7 @@ enum CandidacyContent {
 
 #[derive(Debug)]
 enum PolityAction {
-	EnterPerson{ person_id: usize, allowed_weight: f64 },
+	EnterPerson{ person_id: usize, given_weight: Weight },
 	SetAllocations{ voter_id: usize, resource_allocations: Vec<ResourceAllocation>, resource_score_allocations: Vec<ResourceScoreAllocation> },
 	ExitPerson{ person_id: usize },
 
@@ -36,8 +38,8 @@ enum PolityActionError {
 	NotFound{ id: usize, table_kind: TableKind },
 	NoCandidacy{ candidacy_id: usize, voter_id: usize },
 	NoElection{ election_id: usize, voter_id: usize },
-	NotRequiredEqualWeight{ person_id: usize, found_weight: f64, required_equal_weight: f64 },
-	AboveAllowedWeight{ voter_id: usize, found_weight: f64, allowed_weight: f64 },
+	NotRequiredEqualWeight{ person_id: usize, found_weight: Weight, required_equal_weight: Weight },
+	AboveAllowedWeight{ voter_id: usize, found_weight: Weight, given_weight: Weight },
 	MismatchedKind{ candidacy_id: usize, expected_kind: ElectionKind },
 	MismatchedMethod{ voter_id: usize, election_id: usize, expected_method: SelectionMethodKind },
 	WinningDocumentExit{ candidacy_id: usize },
@@ -70,7 +72,7 @@ impl SelectionMethod {
 }
 
 trait Allocation {
-	fn total_weight(&self) -> f64;
+	fn total_weight(&self) -> Weight;
 	fn compatible_method_kind() -> SelectionMethodKind;
 	fn iter_candidacies(&self) -> Vec<&usize>;
 	fn get_election_id(&self) -> usize;
@@ -80,17 +82,17 @@ trait Allocation {
 struct ResourceAllocation {
 	election_id: usize,
 	candidacy_id: usize,
-	weight: f64,
+	weight: Weight,
 }
 
 impl Allocation for ResourceAllocation {
-	fn total_weight(&self) -> f64 { self.weight }
+	fn total_weight(&self) -> Weight { self.weight }
 	fn compatible_method_kind() -> SelectionMethodKind { SelectionMethodKind::Resource }
 	fn iter_candidacies(&self) -> Vec<&usize> { vec![&self.candidacy_id] }
 	fn get_election_id(&self) -> usize { self.election_id }
 }
 
-fn aggregate_resource_votes(allocations: &Vec<&ResourceAllocation>) -> HashMap<usize, f64> {
+fn aggregate_resource_votes(allocations: &Vec<&ResourceAllocation>) -> HashMap<usize, Weight> {
 	let mut vote_aggregation = HashMap::new();
 	for allocation in allocations {
 		let actual_vote = allocation.weight;
@@ -101,7 +103,7 @@ fn aggregate_resource_votes(allocations: &Vec<&ResourceAllocation>) -> HashMap<u
 	}
 	vote_aggregation
 }
-fn aggregate_quadratic_resource_votes(allocations: &Vec<&ResourceAllocation>) -> HashMap<usize, f64> {
+fn aggregate_quadratic_resource_votes(allocations: &Vec<&ResourceAllocation>) -> HashMap<usize, Weight> {
 	let mut vote_aggregation = HashMap::new();
 	for allocation in allocations {
 		let actual_vote = quadratic_vote(allocation.weight);
@@ -117,25 +119,25 @@ fn aggregate_quadratic_resource_votes(allocations: &Vec<&ResourceAllocation>) ->
 #[derive(Debug, PartialEq)]
 struct ResourceScoreAllocation {
 	election_id: usize,
-	approve_weight: f64,
-	disapprove_weight: f64,
-	scores: HashMap<usize, f64>,
+	approve_weight: Weight,
+	disapprove_weight: Weight,
+	scores: HashMap<usize, Weight>,
 }
 
 impl Allocation for ResourceScoreAllocation {
-	fn total_weight(&self) -> f64 { self.approve_weight + self.disapprove_weight }
+	fn total_weight(&self) -> Weight { self.approve_weight + self.disapprove_weight }
 	fn compatible_method_kind() -> SelectionMethodKind { SelectionMethodKind::ResourceScore }
 	fn iter_candidacies(&self) -> Vec<&usize> { self.scores.keys().collect() }
 	fn get_election_id(&self) -> usize { self.election_id }
 }
 
-fn aggregate_resource_score_votes(allocations: &Vec<&ResourceScoreAllocation>) -> HashMap<usize, f64> {
+fn aggregate_resource_score_votes(allocations: &Vec<&ResourceScoreAllocation>) -> HashMap<usize, Weight> {
 	let mut vote_aggregation = HashMap::new();
 	for allocation in allocations {
 		let actual_approve_weight = allocation.approve_weight;
 		let actual_disapprove_weight = allocation.disapprove_weight;
 		for (candidacy_id, score) in &allocation.scores {
-			let actual_vote = score * (if *score >= 0.0 { actual_approve_weight } else { actual_disapprove_weight });
+			let actual_vote = score * (if *score >= 0.into() { actual_approve_weight } else { actual_disapprove_weight });
 			vote_aggregation
 				.entry(*candidacy_id)
 				.and_modify(|t| *t += actual_vote)
@@ -144,13 +146,13 @@ fn aggregate_resource_score_votes(allocations: &Vec<&ResourceScoreAllocation>) -
 	}
 	vote_aggregation
 }
-fn aggregate_quadratic_resource_score_votes(allocations: &Vec<&ResourceScoreAllocation>) -> HashMap<usize, f64> {
+fn aggregate_quadratic_resource_score_votes(allocations: &Vec<&ResourceScoreAllocation>) -> HashMap<usize, Weight> {
 	let mut vote_aggregation = HashMap::new();
 	for allocation in allocations {
 		let actual_approve_weight = quadratic_vote(allocation.approve_weight);
 		let actual_disapprove_weight = quadratic_vote(allocation.disapprove_weight);
 		for (candidacy_id, score) in &allocation.scores {
-			let actual_vote = score * (if *score >= 0.0 { actual_approve_weight } else { actual_disapprove_weight });
+			let actual_vote = score * (if *score >= 0.into() { actual_approve_weight } else { actual_disapprove_weight });
 			vote_aggregation
 				.entry(*candidacy_id)
 				.and_modify(|t| *t += actual_vote)
@@ -160,13 +162,13 @@ fn aggregate_quadratic_resource_score_votes(allocations: &Vec<&ResourceScoreAllo
 	vote_aggregation
 }
 
-fn quadratic_vote(weight: f64) -> f64 {
-	weight.signum() * weight.abs().sqrt()
+fn quadratic_vote(weight: Weight) -> Weight {
+	weight.signum() * weight.abs().sqrt().unwrap()
 }
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct InputElection {
 	id: usize,
 	title: String,
@@ -196,16 +198,16 @@ impl InputElection {
 }
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum NominationFillMethod {
-	Constant(f64),
+	Constant(Weight),
 	// NoiseAdaptive,
 	None,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum ElectionFillMethod {
-	Constant(f64),
+	Constant(Weight),
 	// OnlyElectorateSize,
 	// ElectorateSizeWithWideness,
 }
@@ -217,10 +219,10 @@ enum ElectionFillMethod {
 // 	WithRemoval,
 // }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CandidacyStatus {
-	Nomination(f64),
-	Election(f64),
+	Nomination(Weight),
+	Election(Weight),
 	Winner,
 }
 
@@ -232,15 +234,15 @@ fn calculate_polity_action(
 	action: PolityAction,
 ) -> Option<()> {
 	match action {
-		PolityAction::EnterPerson{ person_id, allowed_weight } => {
+		PolityAction::EnterPerson{ person_id, given_weight } => {
 			if let Some(required_equal_weight) = state.required_equal_weight {
-				if allowed_weight != required_equal_weight {
-					errors.push(PolityActionError::NotRequiredEqualWeight{ person_id, found_weight: allowed_weight, required_equal_weight });
+				if given_weight != required_equal_weight {
+					errors.push(PolityActionError::NotRequiredEqualWeight{ person_id, found_weight: given_weight, required_equal_weight });
 					return None;
 				}
 			}
 			require_not_present(errors, &state.person_table, &person_id)?;
-			changes.push(PolityStateChange::InsertPerson{ person_id, allowed_weight });
+			changes.push(PolityStateChange::InsertPerson{ person_id, given_weight });
 		},
 		PolityAction::SetAllocations{ voter_id, resource_allocations, resource_score_allocations } => {
 			let person = require_present(errors, &state.person_table, &voter_id)?;
@@ -284,8 +286,8 @@ fn calculate_polity_action(
 
 fn make_initial_status(nomination_fill_method: NominationFillMethod) -> CandidacyStatus {
 	match nomination_fill_method {
-		NominationFillMethod::Constant(_) => { CandidacyStatus::Nomination(0.0) },
-		NominationFillMethod::None => { CandidacyStatus::Election(0.0) },
+		NominationFillMethod::Constant(_) => { CandidacyStatus::Nomination(0.into()) },
+		NominationFillMethod::None => { CandidacyStatus::Election(0.into()) },
 	}
 }
 
@@ -365,7 +367,7 @@ fn perform_election_recalculation(
 	let mut winner_entries = Vec::new();
 	let mut candidacy_entries = Vec::new();
 	for candidacy in candidacies {
-		let total_vote = *aggregation.get(&candidacy.id).unwrap_or(&0.0);
+		let total_vote = *aggregation.get(&candidacy.id).unwrap_or(&0.into());
 		match candidacy.status {
 			CandidacyStatus::Nomination(bucket) => {
 				candidacy_entries.push(CandidacyEntry{ candidacy_id: candidacy.id, is_nomination: true, bucket, total_vote });
@@ -380,8 +382,8 @@ fn perform_election_recalculation(
 	}
 
 	// TODO actually calculate these
-	let nomination_fill_requirement = 0.0;
-	let election_fill_requirement = 0.0;
+	let nomination_fill_requirement = 0.into();
+	let election_fill_requirement = 0.into();
 
 	// TODO issue a warning if there's more than one winner
 	let current_winner = if winner_entries.len() == 1 { Some(winner_entries[0]) } else { None };
@@ -432,40 +434,40 @@ fn perform_election_recalculation(
 struct CandidacyEntry {
 	candidacy_id: usize,
 	is_nomination: bool,
-	bucket: f64,
-	total_vote: f64,
+	bucket: Weight,
+	total_vote: Weight,
 }
 
 fn calculate_next_statuses(
-	nomination_fill_requirement: f64,
-	election_fill_requirement: f64,
-	current_winner: Option<(usize, f64)>,
+	nomination_fill_requirement: Weight,
+	election_fill_requirement: Weight,
+	current_winner: Option<(usize, Weight)>,
 	candidacy_entries: Vec<CandidacyEntry>,
 ) -> (Option<usize>, HashMap<usize, CandidacyStatus>) {
 
-	let (current_winner_id, current_winner_total_vote) = current_winner.unwrap_or((0, 0.0));
+	let (current_winner_id, current_winner_total_vote) = current_winner.unwrap_or((0, 0.into()));
 	let current_winner_id = if current_winner_id == 0 { None } else { Some(current_winner_id) };
 	let mut candidacy_new_statuses = HashMap::new();
 
-	let mut positive_filled_maximum = 0.0;
+	let mut positive_filled_maximum = 0.into();
 	let mut current_possible_winners = Vec::new();
 	for CandidacyEntry{candidacy_id, is_nomination, bucket, total_vote} in candidacy_entries {
 		if is_nomination {
-			let candidacy_new_bucket = f64::max(
+			let candidacy_new_bucket = Weight::max(
 				bucket + total_vote,
-				0.0,
+				0.into(),
 			);
 			let new_status =
-				if candidacy_new_bucket >= nomination_fill_requirement { CandidacyStatus::Election(0.0) }
+				if candidacy_new_bucket >= nomination_fill_requirement { CandidacyStatus::Election(0.into()) }
 				else { CandidacyStatus::Nomination(candidacy_new_bucket) };
 
 			candidacy_new_statuses.insert(candidacy_id, new_status);
 		}
 		else {
 			// TODO consider allowing buckets to *go negative* if total_vote is negative, and even possibly *removing* a candidate if they reach *negative* fill_requirement
-			let candidacy_new_bucket = f64::max(
+			let candidacy_new_bucket = Weight::max(
 				bucket + (total_vote - current_winner_total_vote),
-				0.0,
+				0.into(),
 			);
 			candidacy_new_statuses.insert(candidacy_id, CandidacyStatus::Election(candidacy_new_bucket));
 			// it isn't sound to declare the mere highest candidate the new winner when there isn't a current winner
@@ -474,7 +476,7 @@ fn calculate_next_statuses(
 			// the alternative would be to simply change fill_requirement to 0 if there isn't a current winner
 
 			// if this candidacy has reached the requirement then it has the chance to be the *unique* winner
-			if total_vote <= 0.0 || candidacy_new_bucket < election_fill_requirement { continue; }
+			if total_vote <= 0.into() || candidacy_new_bucket < election_fill_requirement { continue; }
 
 			if total_vote == positive_filled_maximum {
 				current_possible_winners.push(candidacy_id);
@@ -515,10 +517,10 @@ fn validate_allocations(
 	resource_score_allocations: Vec<ResourceScoreAllocation>,
 ) -> Option<(Vec<ResourceAllocation>, Vec<ResourceScoreAllocation>)> {
 	let found_weight =
-		resource_allocations.iter().map(|a| a.total_weight()).sum::<f64>()
-		+ resource_score_allocations.iter().map(|a| a.total_weight()).sum::<f64>();
-	if found_weight > person.allowed_weight {
-		errors.push(PolityActionError::AboveAllowedWeight{ voter_id: person.id, found_weight, allowed_weight: person.allowed_weight });
+		resource_allocations.iter().map(|a| a.total_weight()).sum::<Weight>()
+		+ resource_score_allocations.iter().map(|a| a.total_weight()).sum::<Weight>();
+	if found_weight > person.given_weight {
+		errors.push(PolityActionError::AboveAllowedWeight{ voter_id: person.id, found_weight, given_weight: person.given_weight });
 		return None;
 	}
 
@@ -640,12 +642,6 @@ trait IdAble { type Id: Copy + Hash; fn get_id(&self) -> &Self::Id; }
 
 macro_rules! impl_id_traits {
 	($structname: ident) => {
-		impl PartialEq for $structname {
-			fn eq(&self, other: &Self) -> bool {
-				self.get_id() == other.get_id()
-			}
-		}
-		impl Eq for $structname {}
 		impl Hash for $structname {
 			fn hash<H: Hasher>(&self, state: &mut H) {
 				self.get_id().hash(state);
@@ -668,16 +664,16 @@ macro_rules! impl_id_traits {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct StoragePerson {
 	id: usize,
-	allowed_weight: f64,
+	given_weight: Weight,
 	// name: String,
 }
 impl IdAble for StoragePerson { type Id = usize; fn get_id(&self) -> &Self::Id { &self.id } }
 impl_id_traits!(StoragePerson);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct StorageElection {
 	id: usize,
 	title: String,
@@ -692,7 +688,7 @@ impl IdAble for StorageElection { type Id = usize; fn get_id(&self) -> &Self::Id
 impl_id_traits!(StorageElection);
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct StorageCandidacy {
 	id: usize,
 	owner_id: usize,
@@ -706,7 +702,7 @@ impl_id_traits!(StorageCandidacy);
 
 #[derive(Debug)]
 struct PolityState {
-	required_equal_weight: Option<f64>,
+	required_equal_weight: Option<Weight>,
 
 	person_table: HashSet<StoragePerson>,
 
@@ -720,7 +716,7 @@ struct PolityState {
 
 #[derive(Debug, PartialEq)]
 enum PolityStateChange {
-	InsertPerson{ person_id: usize, allowed_weight: f64 },
+	InsertPerson{ person_id: usize, given_weight: Weight },
 	SetResourceAllocations{ voter_id: usize, allocations: Vec<ResourceAllocation> },
 	SetResourceScoreAllocations{ voter_id: usize, allocations: Vec<ResourceScoreAllocation> },
 	RemovePerson{ person_id: usize },
@@ -753,8 +749,8 @@ impl PolityState {
 	// all of these functions assume validated inputs, calculate_polity_action is responsible for validation
 	fn apply_change(&mut self, change: PolityStateChange) {
 		match change {
-			PolityStateChange::InsertPerson{ person_id, allowed_weight } => {
-				let person = StoragePerson{ id: person_id, allowed_weight };
+			PolityStateChange::InsertPerson{ person_id, given_weight } => {
+				let person = StoragePerson{ id: person_id, given_weight };
 				self.person_table.insert(person);
 			},
 			PolityStateChange::SetResourceAllocations{ voter_id, allocations } => {
@@ -793,7 +789,7 @@ impl PolityState {
 
 #[derive(Debug)]
 struct PolityStateBuilder {
-	required_equal_weight: Option<f64>,
+	required_equal_weight: Option<Weight>,
 	root_constitution: StorageElection,
 }
 
@@ -807,13 +803,13 @@ impl PolityStateBuilder {
 				description: "root constitution".into(),
 				kind: ElectionKind::Document,
 				nomination_fill_method: NominationFillMethod::None,
-				election_fill_method: ElectionFillMethod::Constant(100.0),
+				election_fill_method: ElectionFillMethod::Constant(100.into()),
 				selection_method: SelectionMethod::ResourceScore{ scale_quadratically: false, use_averaging: false },
 				defining_document_id: None,
 			}
 		}
 	}
-	fn with_required_equal_weight(mut self, required_equal_weight: f64) -> PolityStateBuilder {
+	fn with_required_equal_weight(mut self, required_equal_weight: Weight) -> PolityStateBuilder {
 		self.required_equal_weight = Some(required_equal_weight);
 		self
 	}
@@ -854,15 +850,15 @@ mod tests {
 
 		// success EnterPerson
 		let mut changes = Vec::new(); errors.clear();
-		let action = PolityAction::EnterPerson{ person_id: 1, allowed_weight: 10.0 };
+		let action = PolityAction::EnterPerson{ person_id: 1, given_weight: 10.into() };
 		assert!(calculate_polity_action(&state, &mut errors, &mut changes, action).is_some());
 		assert_eq!(errors, vec![]);
-		assert_eq!(changes, vec![PolityStateChange::InsertPerson{ person_id: 1, allowed_weight: 10.0 }]);
+		assert_eq!(changes, vec![PolityStateChange::InsertPerson{ person_id: 1, given_weight: 10.into() }]);
 		state.apply_changes(changes);
 
 		// fail EnterPerson (id conflict)
 		let mut changes = Vec::new(); errors.clear();
-		let action = PolityAction::EnterPerson{ person_id: 1, allowed_weight: 10.0 };
+		let action = PolityAction::EnterPerson{ person_id: 1, given_weight: 10.into() };
 		assert!(calculate_polity_action(&state, &mut errors, &mut changes, action).is_none());
 		assert_eq!(errors, vec![PolityActionError::IdConflict{ id: 1, table_kind: TableKind::StoragePerson }]);
 		assert_eq!(changes, vec![]);
@@ -898,9 +894,30 @@ mod tests {
 		assert_eq!(errors, vec![PolityActionError::NotFound{ id: 2, table_kind: TableKind::StoragePerson }]);
 		assert_eq!(changes, vec![]);
 
-
 		// success EnterCandidacy (intended winner document under root)
-		// success EnterCandidacy (intenced loser document under root)
+		let mut changes = Vec::new(); errors.clear();
+		let new_content = CandidacyContent::Document{
+			pitch: "gonna win".into(), body: "".into(), sub_elections: vec![InputElection {
+				id: 1,
+				title: "gonna win doc".into(),
+				description: "".into(),
+				kind: ElectionKind::Office,
+				selection_method: SelectionMethod::ResourceScore{scale_quadratically: false, use_averaging: false},
+				nomination_fill_method: NominationFillMethod::Constant(10.into()),
+				election_fill_method: ElectionFillMethod::Constant(20.into()),
+			}],
+		};
+		let action = PolityAction::EnterCandidacy{ candidacy_id: 10, owner_id: 1, election_id: 0, content: new_content.clone() };
+		assert!(calculate_polity_action(&state, &mut errors, &mut changes, action).is_some());
+		assert_eq!(errors, vec![]);
+		assert_eq!(changes, vec![
+			PolityStateChange::InsertCandidacy{ candidacy: StorageCandidacy {
+				id: 10, owner_id: 1, election_id: 0, content: new_content, status: CandidacyStatus::Election(0.into()),
+			} },
+		]);
+		state.apply_changes(changes);
+
+		// success EnterCandidacy (intended loser document under root)
 		// success SetAllocations (make above outcomes true)
 		// fail SetAllocations (too much weight)
 		// fail SetAllocations (NoElection)
@@ -925,7 +942,7 @@ mod tests {
 	// some possible properties
 	// - it's impossible to do anything for a person/candidate/election that doesn't exist
 	// - id conflicts are always prevented
-	// - voting with greater than allowed_weight is always prevented
+	// - voting with greater than given_weight is always prevented
 	// - kind mismatches are always caught
 	// - scale_quadratically is always respected
 
@@ -936,8 +953,8 @@ mod tests {
 	// 	// CandidacyEntry {
 	// 	// 	candidacy_id: usize,
 	// 	// 	is_nomination: bool,
-	// 	// 	bucket: f64,
-	// 	// 	total_vote: f64,
+	// 	// 	bucket: Weight,
+	// 	// 	total_vote: Weight,
 	// 	// }
 
 	// 	let (new_winner, candidacy_new_statuses) =

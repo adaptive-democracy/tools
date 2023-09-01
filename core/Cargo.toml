@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 # indextree = "4.5"
+rust_decimal = { version = "1", features = ["maths"] }
 
 [dev-dependencies]
 proptest = "1"
+rust_decimal_macros = "1"
