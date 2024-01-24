@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use sycamore::prelude::*;
 use sycamore_router::{Route, Router, HistoryIntegration, /*navigate*/};
-// use persistent_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
+// use adaptive_democracy_core::{Constitution, Tree, Keyable, ParentKeyable};
 
 type Weight = f64;
 

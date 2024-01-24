@@ -153,9 +153,9 @@
 // }
 
 
-// // persistent democracy is ultimately implemented by a long-running server
+// // adaptive democracy is ultimately implemented by a long-running server
 // // such a server needs to support these things:
-// // - creating new elections, and in the future determining the set of elections based on persistent constitutions
+// // - creating new elections, and in the future determining the set of elections based on adaptive constitutions
 // // - adding or removing candidates to elections, using whatever nomination rules exist for that election
 // // - adding or removing voters
 // // - accepting voter weight allocation updates

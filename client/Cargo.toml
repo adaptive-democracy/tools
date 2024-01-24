@@ -1,12 +1,12 @@
 [package]
-name = "persistent_democracy_client"
+name = "adaptive_democracy_client"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# persistent_democracy_core = { path = "../core" }
+# adaptive_democracy_core = { path = "../core" }
 
 # sycamore = { git = "https://github.com/blainehansen/sycamore", rev = "4a246f2f249948ee9244eb90838d439531e01d9c" }
 sycamore = { path = "../../sycamore/packages/sycamore", features = ["sycamore-futures"] }
